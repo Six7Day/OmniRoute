@@ -96,8 +96,10 @@ const DEFAULT_MODEL_P95_MS = {
 const MIN_HISTORY_SAMPLES = 10;
 const RESET_AWARE_SESSION_WINDOW_MS = 5 * 60 * 60 * 1000;
 const RESET_AWARE_WEEKLY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
-const RESET_AWARE_REMAINING_WEIGHT = 0.45;
-const RESET_AWARE_RESET_PRESSURE_WEIGHT = 0.55;
+const RESET_AWARE_SESSION_REMAINING_WEIGHT = 0.45;
+const RESET_AWARE_SESSION_RESET_PRESSURE_WEIGHT = 0.55;
+const RESET_AWARE_WEEKLY_REMAINING_WEIGHT = 0.25;
+const RESET_AWARE_WEEKLY_RESET_PRESSURE_WEIGHT = 0.75;
 const RESET_AWARE_CONNECTION_CACHE_TTL_MS = 30_000;
 const RESET_AWARE_QUOTA_FETCH_CONCURRENCY = 5;
 const RESET_AWARE_DEFAULTS = {
@@ -816,15 +818,14 @@ function getResetUrgency(resetAt: string | null | undefined, windowMs: number): 
 function scoreQuotaWindow(
   remaining: number,
   resetAt: string | null | undefined,
-  windowMs: number
+  windowMs: number,
+  remainingWeight: number,
+  resetPressureWeight: number
 ): number {
   const normalizedRemaining = clamp01(remaining);
   const resetUrgency = getResetUrgency(resetAt, windowMs);
   const resetPressure = resetUrgency * (1 - normalizedRemaining);
-  return (
-    RESET_AWARE_REMAINING_WEIGHT * normalizedRemaining +
-    RESET_AWARE_RESET_PRESSURE_WEIGHT * resetPressure
-  );
+  return remainingWeight * normalizedRemaining + resetPressureWeight * resetPressure;
 }
 
 function scoreResetAwareQuota(quota: unknown, config: ReturnType<typeof resolveResetAwareConfig>) {
@@ -839,12 +840,16 @@ function scoreResetAwareQuota(quota: unknown, config: ReturnType<typeof resolveR
   const sessionScore = scoreQuotaWindow(
     sessionRemaining,
     sessionWindow?.resetAt,
-    RESET_AWARE_SESSION_WINDOW_MS
+    RESET_AWARE_SESSION_WINDOW_MS,
+    RESET_AWARE_SESSION_REMAINING_WEIGHT,
+    RESET_AWARE_SESSION_RESET_PRESSURE_WEIGHT
   );
   const weeklyScore = scoreQuotaWindow(
     weeklyRemaining,
     weeklyWindow?.resetAt ?? normalizeResetAt(quota.resetAt),
-    RESET_AWARE_WEEKLY_WINDOW_MS
+    RESET_AWARE_WEEKLY_WINDOW_MS,
+    RESET_AWARE_WEEKLY_REMAINING_WEIGHT,
+    RESET_AWARE_WEEKLY_RESET_PRESSURE_WEIGHT
   );
   let score = config.sessionWeight * sessionScore + config.weeklyWeight * weeklyScore;
 

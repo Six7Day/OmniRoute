@@ -324,6 +324,74 @@ test("reset-aware strategy aggressively spends quota that resets soon", async (t
   assert.deepEqual(new Set(selections), new Set([soonLow.id, soonLower.id]));
 });
 
+test("reset-aware strategy prioritizes soon-reset weekly quota over empty later accounts", async (t) => {
+  const fullerSoon = {
+    id: `fuller-soon-${randomUUID()}`,
+    token: `token-fuller-soon-${randomUUID()}`,
+  };
+  const emptyLater = {
+    id: `empty-later-${randomUUID()}`,
+    token: `token-empty-later-${randomUUID()}`,
+  };
+  t.after(
+    installCodexQuotaMock({
+      [fullerSoon.token]: codexQuota({
+        used5h: 25,
+        reset5hSeconds: 2 * 3600,
+        used7d: 70,
+        reset7dSeconds: 2 * 3600,
+      }),
+      [emptyLater.token]: codexQuota({
+        used5h: 1,
+        reset5hSeconds: 5 * 3600,
+        used7d: 0,
+        reset7dSeconds: 7 * 24 * 3600,
+      }),
+    })
+  );
+
+  const combo = resetAwareCombo(`reset-aware-weekly-pressure-${randomUUID()}`, [
+    emptyLater,
+    fullerSoon,
+  ]);
+
+  assert.equal(await selectedConnectionFor(combo), fullerSoon.id);
+});
+
+test("reset-aware strategy keeps 5h reset pressure softer than weekly pressure", async (t) => {
+  const fullerSoon = {
+    id: `session-fuller-soon-${randomUUID()}`,
+    token: `token-session-fuller-soon-${randomUUID()}`,
+  };
+  const emptyLater = {
+    id: `session-empty-later-${randomUUID()}`,
+    token: `token-session-empty-later-${randomUUID()}`,
+  };
+  t.after(
+    installCodexQuotaMock({
+      [fullerSoon.token]: codexQuota({
+        used5h: 70,
+        reset5hSeconds: 2 * 3600,
+        used7d: 1,
+        reset7dSeconds: 7 * 24 * 3600,
+      }),
+      [emptyLater.token]: codexQuota({
+        used5h: 0,
+        reset5hSeconds: 5 * 3600,
+        used7d: 0,
+        reset7dSeconds: 7 * 24 * 3600,
+      }),
+    })
+  );
+
+  const combo = resetAwareCombo(`reset-aware-session-pressure-${randomUUID()}`, [
+    fullerSoon,
+    emptyLater,
+  ]);
+
+  assert.equal(await selectedConnectionFor(combo), emptyLater.id);
+});
+
 test("reset-aware strategy avoids accounts near 5h exhaustion", async (t) => {
   const exhausted5h = {
     id: `exhausted-${randomUUID()}`,
