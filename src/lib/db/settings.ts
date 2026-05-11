@@ -62,6 +62,7 @@ export async function getSettings() {
     hideEndpointNgrokTunnel: false,
     comboConfigMode: "guided",
     codexServiceTier: { enabled: false },
+    codexSessionAffinityTtlMs: 0,
     alwaysPreserveClientCache: "auto",
     idempotencyWindowMs: 5000,
     wsAuth: false,

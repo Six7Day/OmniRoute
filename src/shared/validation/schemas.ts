@@ -400,6 +400,8 @@ const comboRuntimeConfigSchema = z
     resetAwareWeeklyWeight: z.coerce.number().min(0).max(100).optional(),
     resetAwareTieBandPercent: z.coerce.number().min(0).max(100).optional(),
     resetAwareExhaustionGuardPercent: z.coerce.number().min(0).max(100).optional(),
+    resetAwareQuotaCacheTtlMs: z.coerce.number().int().min(0).max(300_000).optional(),
+    resetAwareQuotaCacheMaxStaleMs: z.coerce.number().int().min(0).max(3_600_000).optional(),
   })
   .strict();
 
@@ -445,6 +447,7 @@ export const updateSettingsSchema = z.object({
   hiddenSidebarItems: z.array(z.enum(HIDEABLE_SIDEBAR_ITEM_IDS)).optional(),
   comboConfigMode: z.enum(COMBO_CONFIG_MODES).optional(),
   codexServiceTier: z.object({ enabled: z.boolean() }).optional(),
+  codexSessionAffinityTtlMs: z.number().int().min(0).max(86_400_000).optional(),
   // Routing settings (#134)
   fallbackStrategy: settingsFallbackStrategySchema.optional(),
   wildcardAliases: z.array(z.object({ pattern: z.string(), target: z.string() })).optional(),

@@ -106,6 +106,59 @@ test("getProviderCredentials reports rate limiting when only inactive suppressed
   assert.match(String(result.retryAfterHuman), /reset after/i);
 });
 
+test("codex session account affinity is opt-in and honors TTL", async () => {
+  await settingsDb.updateSettings({ fallbackStrategy: "least-used" });
+  const first = await seedConnection("codex", { name: "codex-affinity-a", priority: 1 });
+  const second = await seedConnection("codex", { name: "codex-affinity-b", priority: 2 });
+
+  const withoutAffinityA = await auth.getProviderCredentials("codex", null, null, "gpt-5", {
+    sessionKey: "session-without-affinity",
+  });
+  const withoutAffinityB = await auth.getProviderCredentials("codex", null, null, "gpt-5", {
+    sessionKey: "session-without-affinity",
+  });
+
+  assert.equal(withoutAffinityA.connectionId, first.id);
+  assert.equal(withoutAffinityB.connectionId, second.id);
+
+  await providersDb.updateProviderConnection(first.id, {
+    lastUsedAt: null,
+    consecutiveUseCount: 0,
+  });
+  await providersDb.updateProviderConnection(second.id, {
+    lastUsedAt: null,
+    consecutiveUseCount: 0,
+  });
+  await settingsDb.updateSettings({ codexSessionAffinityTtlMs: 60_000 });
+
+  const withAffinityA = await auth.getProviderCredentials("codex", null, null, "gpt-5", {
+    sessionKey: "session-with-affinity",
+  });
+  const withAffinityB = await auth.getProviderCredentials("codex", null, null, "gpt-5", {
+    sessionKey: "session-with-affinity",
+  });
+
+  assert.equal(withAffinityA.connectionId, first.id);
+  assert.equal(withAffinityB.connectionId, first.id);
+});
+
+test("session account affinity expires when TTL has passed", async () => {
+  const affinityDb = await import("../../src/lib/db/sessionAccountAffinity.ts");
+  const now = Date.now();
+
+  affinityDb.upsertSessionAccountAffinity("expiring-session", "codex", "conn-a", now, 1000);
+
+  assert.equal(
+    affinityDb.getSessionAccountAffinity("expiring-session", "codex", 1000, now + 500)
+      ?.connectionId,
+    "conn-a"
+  );
+  assert.equal(
+    affinityDb.getSessionAccountAffinity("expiring-session", "codex", 1000, now + 1001),
+    null
+  );
+});
+
 test("getProviderCredentials returns last error metadata when active accounts are all rate limited", async () => {
   const retryAfter = futureIso();
   await seedConnection("openai", {

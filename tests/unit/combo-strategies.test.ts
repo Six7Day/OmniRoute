@@ -524,6 +524,55 @@ test("reset-aware strategy deduplicates quota fetches for repeated connection ta
   assert.equal(fetchCount, 1);
 });
 
+test("reset-aware quota SWR serves stale ordering while refreshing in background", async () => {
+  const provider = `swr-provider-${randomUUID()}`;
+  const cachedFirst = `cached-first-${randomUUID()}`;
+  const cachedSecond = `cached-second-${randomUUID()}`;
+  const fetchCounts = new Map<string, number>();
+
+  registerQuotaFetcher(provider, async (connectionId) => {
+    fetchCounts.set(connectionId, (fetchCounts.get(connectionId) || 0) + 1);
+    if (connectionId === cachedFirst) {
+      return {
+        used: 40,
+        total: 100,
+        percentUsed: 0.4,
+        resetAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+      };
+    }
+    return {
+      used: 20,
+      total: 100,
+      percentUsed: 0.2,
+      resetAt: new Date(Date.now() + 5 * 24 * 3600 * 1000).toISOString(),
+    };
+  });
+
+  const combo = {
+    name: `reset-aware-swr-${randomUUID()}`,
+    strategy: "reset-aware",
+    config: {
+      resetAwareQuotaCacheTtlMs: 1,
+      resetAwareQuotaCacheMaxStaleMs: 60_000,
+    },
+    models: [cachedFirst, cachedSecond].map((connectionId, index) => ({
+      kind: "model",
+      provider,
+      providerId: provider,
+      model: "balanced-model",
+      connectionId,
+      id: `swr-${index}`,
+    })),
+  };
+
+  assert.equal(await selectedConnectionFor(combo), cachedFirst);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(await selectedConnectionFor(combo), cachedFirst);
+
+  assert.equal(fetchCounts.get(cachedFirst), 2);
+  assert.equal(fetchCounts.get(cachedSecond), 2);
+});
+
 test("reset-aware strategy respects API-key allowed connections during expansion", async () => {
   const provider = `limited-provider-${randomUUID()}`;
   const disallowed = await providersDb.createProviderConnection({

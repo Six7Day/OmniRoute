@@ -236,6 +236,10 @@ const resetAwareConnectionCache = new Map<
   string,
   { fetchedAt: number; connections: Array<Record<string, unknown>> }
 >();
+const resetAwareQuotaCache = new Map<
+  string,
+  { fetchedAt: number; quota: unknown; refreshPromise: Promise<unknown> | null }
+>();
 
 /**
  * Normalize a model entry to { model, weight }
@@ -746,6 +750,12 @@ function getWeightConfig(value: unknown, fallback: number): number {
   return numericValue;
 }
 
+function getDurationConfig(value: unknown, fallback: number, max: number): number {
+  const numericValue = finiteNumberOrNull(value);
+  if (numericValue === null || numericValue < 0) return fallback;
+  return Math.min(max, Math.floor(numericValue));
+}
+
 function resolveResetAwareConfig(config: Record<string, unknown> | null | undefined) {
   const sessionWeight = getWeightConfig(
     config?.resetAwareSessionWeight,
@@ -769,6 +779,8 @@ function resolveResetAwareConfig(config: Record<string, unknown> | null | undefi
         config?.resetAwareExhaustionGuardPercent,
         RESET_AWARE_DEFAULTS.exhaustionGuardPercent
       ) / 100,
+    quotaCacheTtlMs: getDurationConfig(config?.resetAwareQuotaCacheTtlMs, 0, 300_000),
+    quotaCacheMaxStaleMs: getDurationConfig(config?.resetAwareQuotaCacheMaxStaleMs, 0, 3_600_000),
   };
 }
 
@@ -971,6 +983,96 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
+async function fetchResetAwareQuotaWithCache({
+  provider,
+  connectionId,
+  connection,
+  fetcher,
+  config,
+  log,
+  comboName,
+}: {
+  provider: string;
+  connectionId: string;
+  connection?: Record<string, unknown>;
+  fetcher: (connectionId: string, connection?: Record<string, unknown>) => Promise<unknown>;
+  config: ReturnType<typeof resolveResetAwareConfig>;
+  log: { debug?: (...args: unknown[]) => void; warn?: (...args: unknown[]) => void };
+  comboName: string;
+}): Promise<unknown> {
+  const cacheKey = `${provider}:${connectionId}`;
+  const ttlMs = config.quotaCacheTtlMs;
+  const maxStaleMs = config.quotaCacheMaxStaleMs;
+  const now = Date.now();
+  const cached = resetAwareQuotaCache.get(cacheKey);
+
+  if (ttlMs <= 0 && maxStaleMs <= 0) {
+    try {
+      return await fetcher(connectionId, connection);
+    } catch (error) {
+      log.warn?.("COMBO", "Reset-aware quota fetch failed.", {
+        comboName,
+        connectionId,
+        err: error,
+        operation: "quotaFetch",
+        provider,
+      });
+      return null;
+    }
+  }
+
+  const refresh = () => {
+    const existing = resetAwareQuotaCache.get(cacheKey);
+    if (existing?.refreshPromise) return existing.refreshPromise;
+
+    const refreshPromise = fetcher(connectionId, connection)
+      .then((quota) => {
+        if (quota) {
+          resetAwareQuotaCache.set(cacheKey, {
+            quota,
+            fetchedAt: Date.now(),
+            refreshPromise: null,
+          });
+        } else {
+          resetAwareQuotaCache.delete(cacheKey);
+        }
+        return quota;
+      })
+      .catch((error) => {
+        const previous = resetAwareQuotaCache.get(cacheKey);
+        if (previous) {
+          resetAwareQuotaCache.set(cacheKey, { ...previous, refreshPromise: null });
+        }
+        log.warn?.("COMBO", "Reset-aware quota fetch failed.", {
+          comboName,
+          connectionId,
+          err: error,
+          operation: "quotaFetch",
+          provider,
+        });
+        return null;
+      });
+
+    resetAwareQuotaCache.set(cacheKey, {
+      quota: existing?.quota ?? cached?.quota ?? null,
+      fetchedAt: existing?.fetchedAt ?? cached?.fetchedAt ?? 0,
+      refreshPromise,
+    });
+    return refreshPromise;
+  };
+
+  if (ttlMs > 0 && cached) {
+    const age = now - cached.fetchedAt;
+    if (age <= ttlMs) return cached.quota;
+    if (maxStaleMs > 0 && age <= ttlMs + maxStaleMs) {
+      void refresh();
+      return cached.quota;
+    }
+  }
+
+  return refresh();
+}
+
 async function orderTargetsByResetAwareQuota(
   targets: ResolvedComboTarget[],
   comboName: string,
@@ -1045,15 +1147,14 @@ async function orderTargetsByResetAwareQuota(
         if (!quotaPromises.has(quotaKey)) {
           quotaPromises.set(
             quotaKey,
-            fetcher(target.connectionId, connectionById.get(target.connectionId)).catch((error) => {
-              log.warn?.("COMBO", "Reset-aware quota fetch failed.", {
-                comboName,
-                connectionId: target.connectionId,
-                err: error,
-                operation: "quotaFetch",
-                provider,
-              });
-              return null;
+            fetchResetAwareQuotaWithCache({
+              provider,
+              connectionId: target.connectionId,
+              connection: connectionById.get(target.connectionId),
+              fetcher,
+              config,
+              log,
+              comboName,
             })
           );
         }

@@ -22,6 +22,8 @@ const DEFAULT_COMBO_CONFIG = {
   resetAwareWeeklyWeight: 0.65,
   resetAwareTieBandPercent: 5,
   resetAwareExhaustionGuardPercent: 10,
+  resetAwareQuotaCacheTtlMs: 0,
+  resetAwareQuotaCacheMaxStaleMs: 0,
 };
 
 const LEGACY_COMBO_RESILIENCE_KEYS = new Set([
