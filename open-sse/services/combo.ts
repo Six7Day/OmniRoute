@@ -96,8 +96,8 @@ const DEFAULT_MODEL_P95_MS = {
 const MIN_HISTORY_SAMPLES = 10;
 const RESET_AWARE_SESSION_WINDOW_MS = 5 * 60 * 60 * 1000;
 const RESET_AWARE_WEEKLY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
-const RESET_AWARE_REMAINING_WEIGHT = 0.55;
-const RESET_AWARE_RESET_WEIGHT = 0.45;
+const RESET_AWARE_REMAINING_WEIGHT = 0.45;
+const RESET_AWARE_RESET_PRESSURE_WEIGHT = 0.55;
 const RESET_AWARE_CONNECTION_CACHE_TTL_MS = 30_000;
 const RESET_AWARE_QUOTA_FETCH_CONCURRENCY = 5;
 const RESET_AWARE_DEFAULTS = {
@@ -818,9 +818,12 @@ function scoreQuotaWindow(
   resetAt: string | null | undefined,
   windowMs: number
 ): number {
+  const normalizedRemaining = clamp01(remaining);
+  const resetUrgency = getResetUrgency(resetAt, windowMs);
+  const resetPressure = resetUrgency * (1 - normalizedRemaining);
   return (
-    RESET_AWARE_REMAINING_WEIGHT * clamp01(remaining) +
-    RESET_AWARE_RESET_WEIGHT * getResetUrgency(resetAt, windowMs)
+    RESET_AWARE_REMAINING_WEIGHT * normalizedRemaining +
+    RESET_AWARE_RESET_PRESSURE_WEIGHT * resetPressure
   );
 }
 

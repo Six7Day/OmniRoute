@@ -276,6 +276,54 @@ test("reset-aware strategy prefers lower weekly remaining quota when reset is mu
   assert.equal(await selectedConnectionFor(combo), soon.id);
 });
 
+test("reset-aware strategy aggressively spends quota that resets soon", async (t) => {
+  const team = { id: `team-${randomUUID()}`, token: `token-team-${randomUUID()}` };
+  const fullLater = { id: `full-${randomUUID()}`, token: `token-full-${randomUUID()}` };
+  const soonLow = { id: `soon-low-${randomUUID()}`, token: `token-soon-low-${randomUUID()}` };
+  const soonLower = {
+    id: `soon-lower-${randomUUID()}`,
+    token: `token-soon-lower-${randomUUID()}`,
+  };
+  t.after(
+    installCodexQuotaMock({
+      [team.token]: codexQuota({
+        used5h: 29,
+        reset5hSeconds: 2.5 * 3600,
+        used7d: 40,
+        reset7dSeconds: 2.25 * 24 * 3600,
+      }),
+      [fullLater.token]: codexQuota({
+        used5h: 1,
+        reset5hSeconds: 5 * 3600,
+        used7d: 0,
+        reset7dSeconds: 7 * 24 * 3600,
+      }),
+      [soonLow.token]: codexQuota({
+        used5h: 1,
+        reset5hSeconds: 5 * 3600,
+        used7d: 86,
+        reset7dSeconds: 1.5 * 3600,
+      }),
+      [soonLower.token]: codexQuota({
+        used5h: 1,
+        reset5hSeconds: 5 * 3600,
+        used7d: 84,
+        reset7dSeconds: 1.5 * 3600,
+      }),
+    })
+  );
+
+  const combo = resetAwareCombo(`reset-aware-pressure-${randomUUID()}`, [
+    team,
+    fullLater,
+    soonLow,
+    soonLower,
+  ]);
+  const selections = [await selectedConnectionFor(combo), await selectedConnectionFor(combo)];
+
+  assert.deepEqual(new Set(selections), new Set([soonLow.id, soonLower.id]));
+});
+
 test("reset-aware strategy avoids accounts near 5h exhaustion", async (t) => {
   const exhausted5h = {
     id: `exhausted-${randomUUID()}`,
