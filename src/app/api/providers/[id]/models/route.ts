@@ -995,6 +995,12 @@ export async function GET(
             ? { supportsStreaming: model.supportsStreaming }
             : {}),
           ...(model.supportsVision !== undefined ? { supportsVision: model.supportsVision } : {}),
+          ...(typeof model.inputTokenLimit === "number"
+            ? { inputTokenLimit: model.inputTokenLimit }
+            : {}),
+          ...(typeof model.outputTokenLimit === "number"
+            ? { outputTokenLimit: model.outputTokenLimit }
+            : {}),
         }));
         return buildApiDiscoveryResponse(models, discovery.warnings[0]);
       } catch (error) {

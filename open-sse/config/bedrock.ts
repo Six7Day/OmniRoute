@@ -1,3 +1,5 @@
+import { getModelSpec } from "../../src/shared/constants/modelSpecs.ts";
+
 export const BEDROCK_DEFAULT_REGION = "us-east-1";
 export const BEDROCK_DASHBOARD_DEFAULT_REGION = "eu-west-2";
 
@@ -76,7 +78,39 @@ export type BedrockDiscoveredModel = {
   provider?: string | null;
   supportsStreaming?: boolean;
   supportsVision?: boolean;
+  inputTokenLimit?: number;
+  outputTokenLimit?: number;
 };
+
+export function getBedrockKnownModelLimits(modelId: string): {
+  inputTokenLimit?: number;
+  outputTokenLimit?: number;
+} | null {
+  const trimmed = typeof modelId === "string" ? modelId.trim() : "";
+  if (!trimmed) return null;
+
+  const unqualified = trimmed.includes("/") ? trimmed.slice(trimmed.indexOf("/") + 1) : trimmed;
+  const withoutProfilePrefix = unqualified.replace(/^(?:eu|us|global)\./i, "");
+  const withoutProviderPrefix = withoutProfilePrefix.replace(/^anthropic\./i, "");
+  const spec =
+    getModelSpec(trimmed) ||
+    getModelSpec(unqualified) ||
+    getModelSpec(withoutProfilePrefix) ||
+    getModelSpec(withoutProviderPrefix);
+
+  if (!spec?.contextWindow && !spec?.maxOutputTokens) return null;
+  return {
+    ...(typeof spec.contextWindow === "number" ? { inputTokenLimit: spec.contextWindow } : {}),
+    ...(typeof spec.maxOutputTokens === "number" ? { outputTokenLimit: spec.maxOutputTokens } : {}),
+  };
+}
+
+function withKnownBedrockLimits(model: BedrockDiscoveredModel): BedrockDiscoveredModel {
+  return {
+    ...model,
+    ...(getBedrockKnownModelLimits(model.id) || {}),
+  };
+}
 
 export function normalizeBedrockDiscoveredModels(
   foundationModelsResponse: unknown,
@@ -99,14 +133,17 @@ export function normalizeBedrockDiscoveredModels(
       if (!id) continue;
       const outputModalities = Array.isArray(model.outputModalities) ? model.outputModalities : [];
       const inputModalities = Array.isArray(model.inputModalities) ? model.inputModalities : [];
-      add({
-        id,
-        name: typeof model.modelName === "string" && model.modelName.trim() ? model.modelName : id,
-        source: "foundation",
-        provider: typeof model.providerName === "string" ? model.providerName : null,
-        supportsStreaming: model.responseStreamingSupported === true,
-        supportsVision: inputModalities.includes("IMAGE") || outputModalities.includes("IMAGE"),
-      });
+      add(
+        withKnownBedrockLimits({
+          id,
+          name:
+            typeof model.modelName === "string" && model.modelName.trim() ? model.modelName : id,
+          source: "foundation",
+          provider: typeof model.providerName === "string" ? model.providerName : null,
+          supportsStreaming: model.responseStreamingSupported === true,
+          supportsVision: inputModalities.includes("IMAGE") || outputModalities.includes("IMAGE"),
+        })
+      );
     }
   }
 
@@ -120,15 +157,18 @@ export function normalizeBedrockDiscoveredModels(
       const id =
         typeof profile.inferenceProfileId === "string" ? profile.inferenceProfileId.trim() : "";
       if (id) {
-        add({
-          id,
-          name:
-            typeof profile.inferenceProfileName === "string" && profile.inferenceProfileName.trim()
-              ? profile.inferenceProfileName
-              : id,
-          source: "inference_profile",
-          supportsStreaming: true,
-        });
+        add(
+          withKnownBedrockLimits({
+            id,
+            name:
+              typeof profile.inferenceProfileName === "string" &&
+              profile.inferenceProfileName.trim()
+                ? profile.inferenceProfileName
+                : id,
+            source: "inference_profile",
+            supportsStreaming: true,
+          })
+        );
       }
 
       const models = Array.isArray(profile.models) ? profile.models : [];
@@ -139,12 +179,14 @@ export function normalizeBedrockDiscoveredModels(
             : {};
         const modelId = modelIdFromArn(modelRecord.modelArn);
         if (modelId) {
-          add({
-            id: modelId,
-            name: modelId,
-            source: "foundation",
-            supportsStreaming: true,
-          });
+          add(
+            withKnownBedrockLimits({
+              id: modelId,
+              name: modelId,
+              source: "foundation",
+              supportsStreaming: true,
+            })
+          );
         }
       }
     }

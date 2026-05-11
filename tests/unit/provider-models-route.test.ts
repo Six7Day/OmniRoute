@@ -1161,6 +1161,8 @@ test("provider models route discovers native Bedrock foundation models and infer
       source: "foundation",
       supportsStreaming: true,
       supportsVision: true,
+      inputTokenLimit: 1000000,
+      outputTokenLimit: 64000,
     },
     {
       id: "eu.anthropic.claude-sonnet-4-6",
@@ -1168,6 +1170,8 @@ test("provider models route discovers native Bedrock foundation models and infer
       owned_by: "bedrock",
       source: "inference_profile",
       supportsStreaming: true,
+      inputTokenLimit: 1000000,
+      outputTokenLimit: 64000,
     },
   ]);
 });
