@@ -501,7 +501,7 @@ export class BedrockExecutor extends BaseExecutor {
     return new BedrockRuntimeClient({
       region,
       token: { token: credentials.apiKey },
-      authSchemePreference: ["smithy.api#httpBearerAuth"],
+      authSchemePreference: ["httpBearerAuth"],
       maxAttempts: 1,
       ...(customUserAgent ? { customUserAgent } : {}),
     });

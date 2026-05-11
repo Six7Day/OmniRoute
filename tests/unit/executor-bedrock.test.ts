@@ -97,6 +97,13 @@ test("BedrockExecutor converts non-streaming Converse output to OpenAI chat comp
   assert.equal(body.usage.total_tokens, 5);
 });
 
+test("BedrockExecutor configures the AWS SDK to use Bedrock bearer API keys", async () => {
+  const created = new BedrockExecutor().createClient(credentials("eu-west-2"));
+
+  assert.equal(typeof created.config.authSchemePreference, "function");
+  assert.deepEqual(await created.config.authSchemePreference(), ["httpBearerAuth"]);
+});
+
 test("BedrockExecutor converts ConverseStream output to OpenAI SSE chunks", async () => {
   async function* bedrockStream() {
     yield { contentBlockDelta: { contentBlockIndex: 0, delta: { text: "Hal" } } };
