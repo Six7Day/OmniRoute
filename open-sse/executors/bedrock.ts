@@ -52,43 +52,7 @@ function normalizeToolUseId(value) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function createToolUseIdTracker() {
-  const usedIds = new Set();
-  const assignedByOriginal = new Map();
-  const resultCursorByOriginal = new Map();
-
-  const uniqueId = (base) => {
-    let candidate = base;
-    let suffix = 2;
-    while (usedIds.has(candidate)) {
-      candidate = `${base}_${suffix}`;
-      suffix += 1;
-    }
-    usedIds.add(candidate);
-    return candidate;
-  };
-
-  return {
-    register(rawId) {
-      const original = normalizeToolUseId(rawId) || `toolu_${randomUUID()}`;
-      const assigned = uniqueId(original);
-      const list = assignedByOriginal.get(original) || [];
-      list.push(assigned);
-      assignedByOriginal.set(original, list);
-      return assigned;
-    },
-    resolveResult(rawId) {
-      const original = normalizeToolUseId(rawId) || `toolu_${randomUUID()}`;
-      const assigned = assignedByOriginal.get(original);
-      if (!assigned || assigned.length === 0) return original;
-      const index = resultCursorByOriginal.get(original) || 0;
-      resultCursorByOriginal.set(original, index + 1);
-      return assigned[Math.min(index, assigned.length - 1)];
-    },
-  };
-}
-
-function textBlocksFromContent(content, toolUseIds = null, options = {}) {
+function textBlocksFromContent(content, options = {}) {
   if (typeof content === "string") return content.trim() ? [{ text: content }] : [];
   if (!Array.isArray(content)) return [];
 
@@ -117,9 +81,10 @@ function textBlocksFromContent(content, toolUseIds = null, options = {}) {
     if (type === "tool_use" && typeof p.id === "string" && typeof p.name === "string") {
       const rawId = normalizeToolUseId(p.id);
       if (rawId && options.skipToolUseIds?.has(rawId)) continue;
+      if (rawId && !options.answeredToolUseIds?.has(rawId)) continue;
       blocks.push({
         toolUse: {
-          toolUseId: toolUseIds ? toolUseIds.register(rawId) : rawId || `toolu_${randomUUID()}`,
+          toolUseId: rawId || `toolu_${randomUUID()}`,
           name: p.name,
           input: asRecord(p.input),
         },
@@ -129,7 +94,7 @@ function textBlocksFromContent(content, toolUseIds = null, options = {}) {
     if (type === "tool_result" && typeof p.tool_use_id === "string") {
       blocks.push({
         toolResult: {
-          toolUseId: toolUseIds ? toolUseIds.resolveResult(p.tool_use_id) : p.tool_use_id,
+          toolUseId: p.tool_use_id,
           content: [{ text: toText(p.content) }],
           status: p.is_error ? "error" : "success",
         },
@@ -174,9 +139,29 @@ function toolResultContentFromMessage(message) {
   return [{ text: toText(content) || " " }];
 }
 
+function collectAnsweredToolUseIds(messages) {
+  const answered = new Set();
+  for (const message of messages) {
+    if (!message || typeof message !== "object") continue;
+    if (message.role === "tool") {
+      const id = normalizeToolUseId(message.tool_call_id);
+      if (id) answered.add(id);
+    }
+    if (!Array.isArray(message.content)) continue;
+    for (const part of message.content) {
+      const p = asRecord(part);
+      if (p.type !== "tool_result") continue;
+      const id = normalizeToolUseId(p.tool_use_id);
+      if (id) answered.add(id);
+    }
+  }
+  return answered;
+}
+
 function messagesFromOpenAI(messages) {
   const converted = [];
   const pendingToolUseIds = new Set();
+  const answeredToolUseIds = collectAnsweredToolUseIds(messages);
 
   for (const message of messages) {
     if (!message || typeof message !== "object") continue;
@@ -185,6 +170,7 @@ function messagesFromOpenAI(messages) {
     if (message.role === "tool") {
       const toolUseId = normalizeToolUseId(message.tool_call_id) || `toolu_${randomUUID()}`;
       pendingToolUseIds.delete(toolUseId);
+      answeredToolUseIds.add(toolUseId);
       converted.push({
         role: "user",
         content: [
@@ -204,8 +190,9 @@ function messagesFromOpenAI(messages) {
     const toolCallIds = new Set(
       toolCalls.map((call) => normalizeToolUseId(call?.id)).filter(Boolean)
     );
-    const content = textBlocksFromContent(message.content, null, {
+    const content = textBlocksFromContent(message.content, {
       skipToolUseIds: toolCallIds,
+      answeredToolUseIds,
     });
     for (const call of toolCalls) {
       const fn = asRecord(call.function);
@@ -218,6 +205,7 @@ function messagesFromOpenAI(messages) {
       }
       const toolUseId = normalizeToolUseId(call.id) || `toolu_${randomUUID()}`;
       if (pendingToolUseIds.has(toolUseId)) continue;
+      if (!answeredToolUseIds.has(toolUseId)) continue;
       pendingToolUseIds.add(toolUseId);
       content.push({
         toolUse: {

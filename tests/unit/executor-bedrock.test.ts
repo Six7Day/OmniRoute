@@ -163,6 +163,56 @@ test("openAIToBedrockConverse allows a tool id to be reused after its result", (
   assert.equal(payload.messages[5].content[0].toolResult.toolUseId, "call_reuse");
 });
 
+test("openAIToBedrockConverse skips assistant tool calls that have no result in history", () => {
+  const payload = openAIToBedrockConverse("anthropic.claude-sonnet-4-6", {
+    messages: [
+      { role: "user", content: "spawn subagents" },
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id: "call_done",
+            type: "function",
+            function: { name: "done", arguments: "{}" },
+          },
+          {
+            id: "call_missing",
+            type: "function",
+            function: { name: "missing", arguments: "{}" },
+          },
+        ],
+      },
+      { role: "tool", tool_call_id: "call_done", content: "ok" },
+      { role: "user", content: "continue" },
+    ],
+  });
+
+  const toolUseIds = payload.messages[1].content.map((block) => block.toolUse?.toolUseId);
+  assert.deepEqual(toolUseIds, ["call_done"]);
+  assert.equal(payload.messages[2].content[0].toolResult.toolUseId, "call_done");
+  assert.equal(payload.messages[3].role, "user");
+});
+
+test("openAIToBedrockConverse skips content tool_use blocks without matching results", () => {
+  const payload = openAIToBedrockConverse("anthropic.claude-sonnet-4-6", {
+    messages: [
+      { role: "user", content: "spawn subagents" },
+      {
+        role: "assistant",
+        content: [
+          { type: "tool_use", id: "call_done", name: "done", input: {} },
+          { type: "tool_use", id: "call_missing", name: "missing", input: {} },
+        ],
+      },
+      { role: "tool", tool_call_id: "call_done", content: "ok" },
+    ],
+  });
+
+  const toolUseIds = payload.messages[1].content.map((block) => block.toolUse?.toolUseId);
+  assert.deepEqual(toolUseIds, ["call_done"]);
+});
+
 test("BedrockExecutor converts non-streaming Converse output to OpenAI chat completion JSON", async () => {
   const sent = [];
   const executor = new BedrockExecutor(() => ({
