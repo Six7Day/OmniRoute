@@ -22,7 +22,7 @@ import { isNoLog } from "../compliance";
 import { sanitizePII } from "../piiSanitizer";
 import { protectPayloadForLog, parseStoredPayload } from "../logPayloads";
 import { getCallLogMaxEntries, getCallLogRetentionDays, getCallLogsTableMaxRows } from "../logEnv";
-import { pickMaskedDisplayValue } from "@/shared/utils/maskEmail";
+import { pickDisplayValue } from "@/shared/utils/maskEmail";
 import {
   CALL_LOGS_DIR,
   cleanupEmptyCallLogDirs,
@@ -73,7 +73,10 @@ type CallLogSummaryRow = {
   has_pipeline_details: number | null;
   request_summary: string | null;
   provider_node_prefix?: string | null;
+  resolved_account?: string | null;
 };
+
+const RESOLVED_ACCOUNT_SQL = "COALESCE(NULLIF(pc.name, ''), NULLIF(pc.email, ''), cl.account)";
 
 type LegacyInlineRow = {
   request_body: string | null;
@@ -86,7 +89,12 @@ type DeleteResult = {
   deletedArtifacts: number;
 };
 
+const CALL_LOG_ROTATION_MIN_INTERVAL_MS = 60_000;
+const CALL_LOG_ROTATION_IDLE_DELAY_MS = 5_000;
+
 let logIdCounter = 0;
+let lastScheduledRotationAt = 0;
+let rotationTimer: ReturnType<typeof setTimeout> | null = null;
 
 function asRecord(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : {};
@@ -116,6 +124,20 @@ function parseInlineError(value: unknown): unknown {
   } catch {
     return value;
   }
+}
+
+function scheduleCallLogRotation() {
+  if (rotationTimer) return;
+
+  const now = Date.now();
+  if (now - lastScheduledRotationAt < CALL_LOG_ROTATION_MIN_INTERVAL_MS) return;
+
+  lastScheduledRotationAt = now;
+  rotationTimer = setTimeout(() => {
+    rotationTimer = null;
+    rotateCallLogs();
+  }, CALL_LOG_ROTATION_IDLE_DELAY_MS);
+  rotationTimer.unref?.();
 }
 
 function normalizeDetailState(value: unknown): CallLogDetailState {
@@ -225,8 +247,9 @@ async function resolveAccountName(connectionId: string | null | undefined) {
     const connections = await getProviderConnections();
     const conn = connections.find((item) => item.id === connectionId);
     if (conn) {
-      account = pickMaskedDisplayValue(
+      account = pickDisplayValue(
         [toStringOrNull(conn.name), toStringOrNull(conn.email)],
+        true,
         account
       );
     }
@@ -540,7 +563,7 @@ function mapSummaryRow(row: CallLogSummaryRow) {
     model: row.model,
     requestedModel: applyNodePrefix(row.requested_model, provider, nodePrefix),
     provider,
-    account: row.account,
+    account: row.resolved_account || row.account,
     connectionId: row.connection_id,
     duration: toNumber(row.duration),
     tokens: {
@@ -721,7 +744,7 @@ export async function saveCallLog(entry: any) {
       requestSummary,
     });
 
-    rotateCallLogs();
+    scheduleCallLogRotation();
   } catch (error) {
     console.error("[callLogs] Failed to save call log:", (error as Error).message);
   }
@@ -755,9 +778,11 @@ export async function getCallLogs(filter: any = {}) {
   const db = getDbInstance();
   let sql = `
     SELECT cl.*,
-      pn.prefix AS provider_node_prefix
+      pn.prefix AS provider_node_prefix,
+      ${RESOLVED_ACCOUNT_SQL} AS resolved_account
     FROM call_logs cl
     LEFT JOIN provider_nodes pn ON pn.id = cl.provider
+    LEFT JOIN provider_connections pc ON pc.id = cl.connection_id
   `;
   const conditions: string[] = [];
   const params: Record<string, unknown> = {};
@@ -785,7 +810,7 @@ export async function getCallLogs(filter: any = {}) {
     params.providerQ = `%${filter.provider}%`;
   }
   if (filter.account) {
-    conditions.push("cl.account LIKE @accountQ");
+    conditions.push(`(cl.account LIKE @accountQ OR ${RESOLVED_ACCOUNT_SQL} LIKE @accountQ)`);
     params.accountQ = `%${filter.account}%`;
   }
   if (filter.apiKey) {
@@ -798,6 +823,7 @@ export async function getCallLogs(filter: any = {}) {
   if (filter.search) {
     conditions.push(`(
       cl.model LIKE @searchQ OR cl.path LIKE @searchQ OR cl.account LIKE @searchQ OR
+      ${RESOLVED_ACCOUNT_SQL} LIKE @searchQ OR
       cl.requested_model LIKE @searchQ OR cl.provider LIKE @searchQ OR
       cl.api_key_name LIKE @searchQ OR cl.api_key_id LIKE @searchQ OR
       cl.combo_name LIKE @searchQ OR CAST(cl.status AS TEXT) LIKE @searchQ
@@ -823,14 +849,14 @@ export async function getCallLogById(id: string) {
   const row = db
     .prepare(
       `SELECT cl.*,
-        pn.prefix AS provider_node_prefix
+        pn.prefix AS provider_node_prefix,
+        ${RESOLVED_ACCOUNT_SQL} AS resolved_account
        FROM call_logs cl
        LEFT JOIN provider_nodes pn ON pn.id = cl.provider
+       LEFT JOIN provider_connections pc ON pc.id = cl.connection_id
        WHERE cl.id = ?`
     )
-    .get(id) as
-    | CallLogSummaryRow
-    | undefined;
+    .get(id) as CallLogSummaryRow | undefined;
   if (!row) return null;
 
   const entry = mapSummaryRow(row);
