@@ -85,6 +85,16 @@ export function maskAccount(account: string | null | undefined, emailsVisible: b
   return account;
 }
 
+export function stableAccountSuffix(account: string | null | undefined): string {
+  if (!account || account === "-") return "0000";
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < account.length; i++) {
+    hash ^= account.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0").slice(0, 4);
+}
+
 /**
  * Format an API key label, showing full name but masking the ID.
  * @param {string} apiKeyName - Human-readable name of the key

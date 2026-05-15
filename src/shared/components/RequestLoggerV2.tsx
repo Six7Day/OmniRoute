@@ -15,6 +15,7 @@ import {
   formatDuration,
   maskSegment,
   maskAccount,
+  stableAccountSuffix,
   formatApiKeyLabel,
 } from "@/shared/utils/formatting";
 import useEmailPrivacyStore from "@/store/emailPrivacyStore";
@@ -429,7 +430,7 @@ export default function RequestLoggerV2() {
           <option value="">{t("allAccounts")}</option>
           {uniqueAccounts.map((a) => (
             <option key={a} value={a}>
-              {maskAccount(a, emailsVisible)}
+              {emailsVisible ? a : `${maskAccount(a, false)} · #${stableAccountSuffix(a)}`}
             </option>
           ))}
         </select>

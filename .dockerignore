@@ -37,12 +37,36 @@ test-results
 playwright-report
 blob-report
 
-# Documentation (not needed in container)
-# Keep the docs directory itself in context so openapi.yaml can be re-included.
-docs/*
-!docs/openapi.yaml
 *.md
 !README.md
+
+# Documentation runtime payload
+# Keep English markdown + OpenAPI for `/docs`; omit heavy generated mirrors/screenshots.
+docs/*
+!docs/*.md
+!docs/architecture/
+!docs/architecture/*.md
+!docs/compression/
+!docs/compression/*.md
+!docs/diagrams/
+!docs/diagrams/*.md
+!docs/diagrams/*.mmd
+!docs/frameworks/
+!docs/frameworks/*.md
+!docs/guides/
+!docs/guides/*.md
+!docs/ops/
+!docs/ops/*.md
+!docs/reference/
+!docs/reference/*.md
+!docs/reference/*.yaml
+!docs/routing/
+!docs/routing/*.md
+!docs/security/
+!docs/security/*.md
+docs/i18n/
+docs/screenshots/
+docs/diagrams/exported/
 
 # Electron (separate build)
 electron
