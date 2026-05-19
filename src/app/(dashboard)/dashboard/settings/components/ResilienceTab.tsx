@@ -247,18 +247,15 @@ function RequestQueueCard({
           <div className="flex items-center gap-2">
             <span className="material-symbols-outlined text-xl text-primary">speed</span>
             <h2 className="text-lg font-bold">
-              {settingsText("resilienceRequestQueueTitle", "Request Queue and Pace")}
+              {settingsText("resilienceRequestQueueTitle", "Request Queue & Rate")}
             </h2>
           </div>
           <SectionDescription
             scope={settingsText("resilienceRequestQueueScope", "Per request queue")}
-            trigger={settingsText(
-              "resilienceRequestQueueTrigger",
-              "Before sending to the upstream"
-            )}
+            trigger={settingsText("resilienceRequestQueueTrigger", "Before sending to upstream")}
             effect={settingsText(
               "resilienceRequestQueueEffect",
-              "Queues requests, limits concurrency, and spaces out calls"
+              "Queues requests, limits concurrency, and spaces calls"
             )}
           />
         </div>
@@ -280,7 +277,7 @@ function RequestQueueCard({
       <p className="mb-4 text-sm text-text-muted">
         {settingsText(
           "resilienceRequestQueueDesc",
-          "This layer only controls queueing and pacing. It does not store cooldowns or open circuit breakers."
+          "This layer only controls queueing and pacing. It does not write cooldown state nor open the circuit breaker."
         )}
       </p>
 
@@ -290,11 +287,11 @@ function RequestQueueCard({
             <BooleanField
               label={settingsText(
                 "resilienceAutoEnableApiKeyProviders",
-                "Auto-enable for API key providers"
+                "Auto-enable for API-key providers"
               )}
               description={settingsText(
                 "resilienceAutoEnableApiKeyProvidersDesc",
-                "Enables queue protection by default for active API key connections."
+                "Enable queue protection by default for active API-key connections."
               )}
               checked={draft.autoEnableApiKeyProviders}
               onChange={(autoEnableApiKeyProviders) =>
@@ -340,7 +337,7 @@ function RequestQueueCard({
               <div className="text-xs text-text-muted">
                 {settingsText(
                   "resilienceAutoEnableApiKeyProviders",
-                  "Auto-enable for API key providers"
+                  "Auto-enable for API-key providers"
                 )}
               </div>
               <div className="mt-1 text-sm font-semibold text-text-main">
@@ -424,7 +421,7 @@ function ConnectionCooldownCard({
               label={settingsText("resilienceUseUpstreamRetryHints", "Use upstream retry hints")}
               description={settingsText(
                 "resilienceUseUpstreamRetryHintsDesc",
-                "Uses retry-after/reset values from the upstream provider when available."
+                "Use upstream retry-after/reset values when available."
               )}
               checked={current.useUpstreamRetryHints}
               onChange={(useUpstreamRetryHints) =>
@@ -484,7 +481,7 @@ function ConnectionCooldownCard({
               </p>
             </div>
             <NumberField
-              label={settingsText("resilienceMaxBackoffSteps", "Maximum backoff steps")}
+              label={settingsText("resilienceMaxBackoffSteps", "Max backoff steps")}
               value={current.maxBackoffSteps}
               min={0}
               onChange={(maxBackoffSteps) =>
@@ -527,7 +524,7 @@ function ConnectionCooldownCard({
             </div>
             <div className="flex items-center justify-between text-sm">
               <span className="text-text-muted">
-                {settingsText("resilienceMaxBackoffSteps", "Maximum backoff steps")}
+                {settingsText("resilienceMaxBackoffSteps", "Max backoff steps")}
               </span>
               <span className="font-mono text-text-main">{current.maxBackoffSteps}</span>
             </div>
@@ -555,7 +552,7 @@ function ConnectionCooldownCard({
             )}
             effect={settingsText(
               "resilienceConnectionCooldownEffect",
-              "Temporarily skips that connection and increases backoff for repeated failures"
+              "Temporarily skips that connection and increases backoff after repeated failures"
             )}
           />
         </div>
@@ -596,7 +593,7 @@ function ConnectionCooldownCard({
       <p className="mb-4 text-sm text-text-muted">
         {settingsText(
           "resilienceConnectionCooldownDesc",
-          "The base cooldown covers transient connection failures. When upstream retry hints are enabled, the provider's explicit window overrides the local cooldown."
+          "Base cooldown covers transient connection failures. When upstream retry hints are enabled, the provider's explicit retry window overrides the local cooldown."
         )}
       </p>
 
@@ -640,7 +637,7 @@ function ProviderBreakerCard({
               }
             />
             <NumberField
-              label={settingsText("resilienceResetTime", "Reset time")}
+              label={settingsText("resilienceResetTime", "Reset timeout")}
               value={current.resetTimeoutMs}
               min={1000}
               suffix="ms"
@@ -659,7 +656,7 @@ function ProviderBreakerCard({
             </div>
             <div className="flex items-center justify-between text-sm">
               <span className="text-text-muted">
-                {settingsText("resilienceResetTime", "Reset time")}
+                {settingsText("resilienceResetTime", "Reset timeout")}
               </span>
               <span className="font-mono text-text-main">{formatMs(current.resetTimeoutMs)}</span>
             </div>
@@ -678,18 +675,18 @@ function ProviderBreakerCard({
               electrical_services
             </span>
             <h2 className="text-lg font-bold">
-              {settingsText("resilienceProviderBreakerTitle", "Provider Circuit Breaker")}
+              {settingsText("resilienceProviderBreakerTitle", "Circuit Breaker per Provider")}
             </h2>
           </div>
           <SectionDescription
             scope={settingsText("resilienceProviderBreakerScope", "Entire provider")}
             trigger={settingsText(
               "resilienceProviderBreakerTrigger",
-              "Final transport/server failures after connection fallback is exhausted"
+              "Final transport/server failures after exhausting connection fallback"
             )}
             effect={settingsText(
               "resilienceProviderBreakerEffect",
-              "Temporarily blocks that provider until the reset time expires"
+              "Temporarily blocks this provider until the reset timeout expires"
             )}
           />
         </div>
@@ -711,7 +708,7 @@ function ProviderBreakerCard({
       <p className="mb-4 text-sm text-text-muted">
         {settingsText(
           "resilienceProviderBreakerDesc",
-          "Live breaker state appears only on the Health page. Connection-scoped 429 rate limits stay in Connection Cooldown and do not trip the provider breaker."
+          "The live breaker state is shown only on the Health page. 429 rate limits at the connection scope stay in Connection Cooldown and do not trip the provider breaker."
         )}
       </p>
 
@@ -747,14 +744,14 @@ function WaitForCooldownCard({
           <div className="flex items-center gap-2">
             <span className="material-symbols-outlined text-xl text-primary">hourglass_top</span>
             <h2 className="text-lg font-bold">
-              {settingsText("resilienceWaitForCooldownTitle", "Wait For Cooldown")}
+              {settingsText("resilienceWaitForCooldownTitle", "Wait for Cooldown")}
             </h2>
           </div>
           <SectionDescription
             scope={settingsText("resilienceWaitForCooldownScope", "Current client request")}
             trigger={settingsText(
               "resilienceWaitForCooldownTrigger",
-              "When all candidate connections are already cooling down"
+              "When all candidate connections are already in cooldown"
             )}
             effect={settingsText(
               "resilienceWaitForCooldownEffect",
@@ -780,7 +777,7 @@ function WaitForCooldownCard({
       <p className="mb-4 text-sm text-text-muted">
         {settingsText(
           "resilienceWaitForCooldownDesc",
-          "This only affects the current request. It does not store connection or provider state."
+          "This only affects the current request. No connection or provider state is written."
         )}
       </p>
 
@@ -797,13 +794,13 @@ function WaitForCooldownCard({
               onChange={(enabled) => setDraft((prev) => ({ ...prev, enabled }))}
             />
             <NumberField
-              label={settingsText("resilienceMaxAttempts", "Maximum attempts")}
+              label={settingsText("resilienceMaxAttempts", "Maximum retries")}
               value={draft.maxRetries}
               min={0}
               onChange={(maxRetries) => setDraft((prev) => ({ ...prev, maxRetries }))}
             />
             <NumberField
-              label={settingsText("resilienceMaxWaitPerAttempt", "Maximum wait per attempt")}
+              label={settingsText("resilienceMaxWaitPerAttempt", "Maximum wait per retry")}
               value={draft.maxRetryWaitSec}
               min={0}
               suffix="sec"
@@ -824,13 +821,13 @@ function WaitForCooldownCard({
             </div>
             <div className="rounded-xl border border-border bg-bg-subtle p-4">
               <div className="text-xs text-text-muted">
-                {settingsText("resilienceMaxAttempts", "Maximum attempts")}
+                {settingsText("resilienceMaxAttempts", "Maximum retries")}
               </div>
               <div className="mt-1 text-sm font-semibold text-text-main">{value.maxRetries}</div>
             </div>
             <div className="rounded-xl border border-border bg-bg-subtle p-4">
               <div className="text-xs text-text-muted">
-                {settingsText("resilienceMaxWaitPerAttempt", "Maximum wait per attempt")}
+                {settingsText("resilienceMaxWaitPerAttempt", "Maximum wait per retry")}
               </div>
               <div className="mt-1 text-sm font-semibold text-text-main">
                 {value.maxRetryWaitSec}s

@@ -79,6 +79,7 @@ import {
 import { registerBailianCodingPlanQuotaFetcher } from "@omniroute/open-sse/services/bailianQuotaFetcher.ts";
 import { registerCrofUsageFetcher } from "@omniroute/open-sse/services/crofUsageFetcher.ts";
 import { registerDeepseekQuotaFetcher } from "@omniroute/open-sse/services/deepseekQuotaFetcher.ts";
+import { registerGenericQuotaFetchers } from "@omniroute/open-sse/services/genericQuotaFetcher.ts";
 import {
   getCooldownAwareRetryDecision,
   resolveCooldownAwareRetrySettings,
@@ -100,6 +101,12 @@ registerCrofUsageFetcher();
 // Register DeepSeek balance quota fetcher.
 // Hooks into quotaPreflight + quotaMonitor so combos can switch accounts before balance is exhausted.
 registerDeepseekQuotaFetcher();
+
+// Register the generic quota fetcher for every other provider that has a
+// usage implementation in usage.ts but no bespoke preflight fetcher. This is
+// what lets the per-window cutoff modal in Dashboard › Limits actually
+// enforce thresholds for Claude / GLM / Cursor / etc., not just Codex.
+registerGenericQuotaFetchers();
 let combosCachePromise: Promise<unknown[]> | null = null;
 let combosCacheTs = 0;
 const COMBOS_CACHE_TTL_MS = 10_000;
@@ -307,8 +314,12 @@ export async function handleChat(request: any, clientRawRequest: any = null) {
   let autoVariant: AutoVariant | undefined;
   let isAutoRouting = resolvedModelStr === "auto" || resolvedModelStr.startsWith("auto/");
   if (isAutoRouting) {
-    // C2: Enforce autoRoutingEnabled setting
-    const settings = await getSettings();
+    // C2: Enforce autoRoutingEnabled setting.
+    // Issue #2346: `getSettings` was never imported in this module; only
+    // `getCachedSettings` is. Calling the bare name caused a ReferenceError
+    // on every auto-routed request. The cached variant has the same shape
+    // and benefits the auto-routing hot path.
+    const settings = await getCachedSettings().catch(() => ({}) as Record<string, unknown>);
     if (settings?.autoRoutingEnabled === false) {
       return errorResponse(
         HTTP_STATUS.BAD_REQUEST,

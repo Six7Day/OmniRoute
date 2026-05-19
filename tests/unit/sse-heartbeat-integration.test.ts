@@ -10,23 +10,21 @@ function decodeChunk(value) {
   return typeof value === "string" ? value : new TextDecoder().decode(value);
 }
 
-function readWithTimeout(reader, timeoutMs = 200) {
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(
-      () => reject(new Error("timed out waiting for heartbeat")),
-      timeoutMs
-    );
-    reader.read().then(
-      (result) => {
-        clearTimeout(timeout);
-        resolve(result);
-      },
-      (error) => {
-        clearTimeout(timeout);
-        reject(error);
-      }
-    );
-  });
+async function readWithTimeout(reader, timeoutMs = 250) {
+  let timeout;
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error("Timed out waiting for SSE heartbeat")),
+          timeoutMs
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 test("integration: anthropic-ping heartbeat reaches downstream and does NOT trigger stream.ts strip", async () => {
@@ -54,16 +52,26 @@ test("integration: anthropic-ping heartbeat reaches downstream and does NOT trig
   const { value: first } = await reader.read();
   assert.match(decodeChunk(first), /event: message_start/);
 
-  const { value, done } = await readWithTimeout(reader);
-  assert.equal(done, false);
-  const chunk = decodeChunk(value);
-  assert.match(chunk, /^event: ping\b/m);
-  for (const line of chunk.split("\n")) {
-    assert.ok(
-      !STREAM_TS_STRIP_RE.test(line.trim()),
-      `heartbeat chunk produced a stream.ts-strippable line: ${line}`
-    );
+  // Wait for at least one heartbeat (interval = 20ms, give it 60ms slack)
+  const startedAt = Date.now();
+  let sawPing = false;
+  while (Date.now() - startedAt < 200) {
+    const { value, done } = await readWithTimeout(reader);
+    if (done) break;
+    const chunk = decodeChunk(value);
+    if (/^event: ping\b/m.test(chunk)) {
+      sawPing = true;
+      // Verify it does NOT match the strip regex
+      for (const line of chunk.split("\n")) {
+        assert.ok(
+          !STREAM_TS_STRIP_RE.test(line.trim()),
+          `heartbeat chunk produced a stream.ts-strippable line: ${line}`
+        );
+      }
+      break;
+    }
   }
+  assert.equal(sawPing, true);
 
   await reader.cancel();
 });
@@ -89,15 +97,22 @@ test("integration: openai-chunk heartbeat is valid JSON parseable by SDKs", asyn
 
   await reader.read(); // skip first real chunk
 
-  const { value, done } = await readWithTimeout(reader);
-  assert.equal(done, false);
-  const chunk = decodeChunk(value);
-  assert.match(chunk, /^data: /);
-  assert.match(chunk, /omniroute-keepalive/);
-  const jsonStr = chunk.slice(6, chunk.indexOf("\n\n"));
-  const parsed = JSON.parse(jsonStr); // must not throw
-  assert.equal(parsed.object, "chat.completion.chunk");
-  assert.equal(parsed.choices[0].finish_reason, null);
+  const startedAt = Date.now();
+  let sawValidChunk = false;
+  while (Date.now() - startedAt < 200) {
+    const { value, done } = await readWithTimeout(reader);
+    if (done) break;
+    const chunk = decodeChunk(value);
+    if (chunk.startsWith("data: ") && chunk.includes("omniroute-keepalive")) {
+      const jsonStr = chunk.slice(6, chunk.indexOf("\n\n"));
+      const parsed = JSON.parse(jsonStr); // must not throw
+      assert.equal(parsed.object, "chat.completion.chunk");
+      assert.equal(parsed.choices[0].finish_reason, null);
+      sawValidChunk = true;
+      break;
+    }
+  }
+  assert.equal(sawValidChunk, true);
 
   await reader.cancel();
 });

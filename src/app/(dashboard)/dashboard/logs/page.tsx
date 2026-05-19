@@ -148,7 +148,6 @@ export default function LogsPage() {
         </div>
       </div>
 
-      {/* Content */}
       {activeTab === "request-logs" && (
         <div className="flex flex-col gap-6">
           <ActiveRequestsPanel />

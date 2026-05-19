@@ -162,6 +162,7 @@ function buildCommandCodeBody(model: string, body: unknown, stream = false): Jso
     },
     memory: "",
     taste: "",
+    skills: "",
     permissionMode: "standard",
     params: {
       model,
@@ -169,7 +170,7 @@ function buildCommandCodeBody(model: string, body: unknown, stream = false): Jso
       tools: convertTools(input.tools),
       system,
       max_tokens: clampMaxTokens(input.max_tokens ?? input.max_completion_tokens),
-      stream: Boolean(stream),
+      stream: true,
     },
   };
 }

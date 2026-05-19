@@ -355,7 +355,7 @@ test("provider models route returns the local catalog for embedding and rerank p
   assert.equal(voyageBody.provider, "voyage-ai");
   assert.equal(voyageBody.source, "local_catalog");
   assert.ok(voyageBody.models.some((model) => model.id === "voyage-4-large"));
-  assert.ok(voyageBody.models.some((model) => model.id === "voyage-3-large"));
+  assert.ok(voyageBody.models.some((model) => model.id === "voyage-4-lite"));
 
   assert.equal(jinaResponse.status, 200);
   assert.equal(jinaBody.provider, "jina-ai");

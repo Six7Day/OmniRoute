@@ -212,7 +212,7 @@ describe("API Routes — export HTTP methods", () => {
 
 describe("API Routes — dashboard and tool consumers", () => {
   it("keeps model-combo mapping APIs wired through routing settings", () => {
-    const settingsPage = readProjectFile("src/app/(dashboard)/dashboard/settings/page.tsx");
+    const settingsPage = readProjectFile("src/app/(dashboard)/dashboard/settings/routing/page.tsx");
     const modelRoutingSection = readProjectFile("src/shared/components/ModelRoutingSection.tsx");
 
     assert.ok(settingsPage, "settings page should exist");
@@ -345,7 +345,9 @@ describe("API Routes — T09 /v1 catalog consistency", () => {
 });
 
 describe("Dashboard Wiring — T05 payload rules", () => {
-  const settingsPageSrc = readProjectFile("src/app/(dashboard)/dashboard/settings/page.tsx");
+  const settingsPageSrc = readProjectFile(
+    "src/app/(dashboard)/dashboard/settings/advanced/page.tsx"
+  );
   const payloadRulesTabSrc = readProjectFile(
     "src/app/(dashboard)/dashboard/settings/components/PayloadRulesTab.tsx"
   );
@@ -353,8 +355,10 @@ describe("Dashboard Wiring — T05 payload rules", () => {
 
   it("settings page should surface payload rules inside advanced settings", () => {
     assert.ok(settingsPageSrc, "settings page source should exist");
-    assert.match(settingsPageSrc, /import PayloadRulesTab from "\.\/components\/PayloadRulesTab"/);
-    assert.match(settingsPageSrc, /activeTab === "advanced"/);
+    assert.match(
+      settingsPageSrc,
+      /import PayloadRulesTab from "\.\.\/components\/PayloadRulesTab"/
+    );
     assert.match(settingsPageSrc, /<PayloadRulesTab\s*\/>/);
   });
 
@@ -445,13 +449,13 @@ describe("Page Integration — logs page wiring", () => {
 });
 
 describe("Page Integration — settings page wiring", () => {
-  const src = readProjectFile("src/app/(dashboard)/dashboard/settings/page.tsx");
+  const src = readProjectFile("src/app/(dashboard)/dashboard/settings/resilience/page.tsx");
   const memorySkillsTab = readProjectFile(
     "src/app/(dashboard)/dashboard/settings/components/MemorySkillsTab.tsx"
   );
 
   it("should include resilience tab in advanced settings", () => {
-    assert.ok(src, "src/app/(dashboard)/dashboard/settings/page.tsx should exist");
+    assert.ok(src, "src/app/(dashboard)/dashboard/settings/resilience/page.tsx should exist");
     assert.match(src, /ResilienceTab/);
   });
 

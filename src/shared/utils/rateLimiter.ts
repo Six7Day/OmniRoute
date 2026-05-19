@@ -116,9 +116,6 @@ function checkInMemoryRateLimit(
   return { allowed: true };
 }
 
-/**
- * Checks multi-window rate limits for an API key atomically via Redis.
- */
 export async function checkRateLimit(
   keyId: string,
   rules: RateLimitRule[]
@@ -140,6 +137,7 @@ export async function checkRateLimit(
   }
 
   const redis = getRedisClient();
+
   const args: (string | number)[] = [Math.floor(Date.now() / 1000)];
 
   for (const rule of rules) {

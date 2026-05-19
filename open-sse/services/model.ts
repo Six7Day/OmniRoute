@@ -32,6 +32,9 @@ for (const [id, alias] of Object.entries(PROVIDER_ID_TO_ALIAS)) {
 // Provider-scoped legacy model aliases. Used to normalize provider/model inputs
 // and keep backward compatibility when upstream IDs change.
 const PROVIDER_MODEL_ALIASES: ProviderModelAliasMap = {
+  openai: {
+    "gpt-4o-mini": "gpt-4o-mini",
+  },
   github: {
     "claude-4.5-opus": "claude-opus-4-5-20251101",
     "claude-opus-4.5": "claude-opus-4-5-20251101",
@@ -166,8 +169,13 @@ function hasKnownProviderModel(providerOrAlias: string | null | undefined, model
 
   if (models.some((entry) => entry?.id === modelId)) return true;
 
+  const aliases = PROVIDER_MODEL_ALIASES[providerId];
+  if (aliases && Object.prototype.hasOwnProperty.call(aliases, modelId)) return true;
+
   const canonicalModel = resolveProviderModelAlias(providerId, modelId);
-  return canonicalModel !== modelId && models.some((entry) => entry?.id === canonicalModel);
+  if (canonicalModel === modelId) return false;
+
+  return true;
 }
 
 function hasCodexPreferredUnprefixedModel(modelId: string) {

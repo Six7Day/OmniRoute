@@ -721,6 +721,29 @@ test("Files and batches routes expose explicit CORS preflight handlers", async (
   }
 });
 
+test("Batch by-id route does not expose ownerless records to anonymous requests", async () => {
+  const file = createFile({
+    bytes: 2,
+    filename: "ownerless.jsonl",
+    purpose: "batch",
+    content: Buffer.from("{}"),
+    apiKeyId: null,
+  });
+  const batch = createBatch({
+    endpoint: "/v1/chat/completions",
+    completionWindow: "24h",
+    inputFileId: file.id,
+    apiKeyId: null,
+  });
+
+  const response = await batchByIdRoute.GET(
+    new Request(`http://localhost/api/v1/batches/${batch.id}`),
+    { params: Promise.resolve({ id: batch.id }) }
+  );
+
+  assert.strictEqual(response.status, 404);
+});
+
 test("Batch Cancel API", async () => {
   const apiKey = await createApiKey("Cancel Test Key", "test-machine");
 
@@ -781,7 +804,7 @@ test("Batch processor keeps cancelled status for in-flight batches", async () =>
       method: "POST",
       url: "/v1/chat/completions",
       body: {
-        model: "openai/gpt-4o-mini",
+        model: "openai/gpt-4.1",
         messages: [{ role: "user", content: "cancel me" }],
       },
     }),
