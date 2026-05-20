@@ -1,3 +1,9 @@
+import { getComboByName } from "@/lib/db/combos";
+import { buildComboScoringInspectorResponse } from "@/lib/usage/comboScoringInspector";
+import type {
+  ComboScoringInspectorFactor,
+  ComboScoringInspectorTarget,
+} from "@/shared/types/utilization";
 import { getCallLogById, getCallLogs } from "./callLogs";
 
 type JsonRecord = Record<string, unknown>;
@@ -66,6 +72,63 @@ type TargetStats = {
   lastUsedAt: string | null;
 };
 
+type DecisionReplayAlignment =
+  | "matches_recomputed_top_target"
+  | "differs_from_recomputed_top_target"
+  | "runtime_target_missing_from_recompute"
+  | "not_combo_routed";
+
+type DecisionReplayCandidate = {
+  executionKey: string;
+  stepId: string | null;
+  provider: string;
+  model: string;
+  connectionId: string | null;
+  label: string | null;
+  rank: number;
+  score: number;
+  isRuntimeSelected: boolean;
+  wouldSelectNow: boolean;
+  factors: ComboScoringInspectorFactor[];
+  signals: ComboScoringInspectorTarget["signals"];
+};
+
+type DecisionReplay = {
+  runtime: {
+    source: "call_logs";
+    exact: true;
+    selectedCallLogId: string;
+    comboName: string | null;
+    comboStepId: string | null;
+    comboExecutionKey: string | null;
+    provider: string | null;
+    model: string | null;
+    connectionId: string | null;
+    status: number;
+    timestamp: string | null;
+    durationMs: number;
+  };
+  recompute: null | {
+    source: "comboScoringInspector";
+    method: "read_only_recompute";
+    exactRuntimeReplay: false;
+    asOf: string;
+    timeRange: "24h";
+    horizon: "7d";
+    comboId: string;
+    comboName: string;
+    strategy: string;
+    taskType: "default";
+    recomputedSelectedExecutionKey: string | null;
+    runtimeSelectedRank: number | null;
+    runtimeSelectedScore: number | null;
+    alignment: DecisionReplayAlignment;
+    candidates: DecisionReplayCandidate[];
+    warnings: string[];
+  };
+  warnings: string[];
+};
+
 export type RouteExplainabilityResponse = {
   requestId: string;
   generatedAt: string;
@@ -119,6 +182,7 @@ export type RouteExplainabilityResponse = {
   evidence: Array<{ label: string; value: string; tone: ExplanationFactor["status"] }>;
   recommendations: string[];
   limitations: string[];
+  decisionReplay: DecisionReplay;
 };
 
 function asExplainLog(value: unknown): ExplainLog | null {
@@ -386,6 +450,172 @@ function buildLimitations(log: ExplainLog, relatedTargets: ExplainTarget[]): str
   return limitations;
 }
 
+function buildDecisionReplayRuntime(log: ExplainLog): DecisionReplay["runtime"] {
+  return {
+    source: "call_logs",
+    exact: true,
+    selectedCallLogId: log.id,
+    comboName: log.comboName ?? null,
+    comboStepId: log.comboStepId ?? null,
+    comboExecutionKey: log.comboExecutionKey ?? null,
+    provider: log.provider ?? null,
+    model: log.model ?? null,
+    connectionId: log.connectionId ?? null,
+    status: toNumber(log.status),
+    timestamp: log.timestamp ?? null,
+    durationMs: toNumber(log.duration),
+  };
+}
+
+function comboIdFromRecord(combo: unknown): string | null {
+  if (!combo || typeof combo !== "object") return null;
+  const record = combo as JsonRecord;
+  return toStringOrNull(record.id);
+}
+
+function targetMatchesRuntime(target: ComboScoringInspectorTarget, log: ExplainLog): boolean {
+  const runtimeExecutionKey = toStringOrNull(log.comboExecutionKey);
+  if (runtimeExecutionKey && target.executionKey === runtimeExecutionKey) return true;
+
+  const runtimeStepId = toStringOrNull(log.comboStepId);
+  if (runtimeStepId && target.stepId === runtimeStepId) return true;
+
+  if (target.provider !== log.provider || target.model !== log.model) return false;
+  if (target.connectionId && log.connectionId && target.connectionId !== log.connectionId) {
+    return false;
+  }
+  return true;
+}
+
+function buildReplayCandidates(
+  targets: ComboScoringInspectorTarget[],
+  runtimeTarget: ComboScoringInspectorTarget | undefined
+): DecisionReplayCandidate[] {
+  const selectedExecutionKey = targets[0]?.executionKey ?? null;
+  const limited = targets.slice(0, 10);
+  if (
+    runtimeTarget &&
+    !limited.some((target) => target.executionKey === runtimeTarget.executionKey)
+  ) {
+    limited.push(runtimeTarget);
+  }
+
+  return limited.map((target) => ({
+    executionKey: target.executionKey,
+    stepId: target.stepId,
+    provider: target.provider,
+    model: target.model,
+    connectionId: target.connectionId,
+    label: target.label,
+    rank: target.rank,
+    score: target.score,
+    isRuntimeSelected: runtimeTarget?.executionKey === target.executionKey,
+    wouldSelectNow: selectedExecutionKey === target.executionKey,
+    factors: target.factors,
+    signals: target.signals,
+  }));
+}
+
+function buildReplayWarnings(log: ExplainLog, comboWarnings: string[]): string[] {
+  const warnings = [
+    "Runtime fields are exact only for metadata persisted in the selected call log row.",
+    "Read-only recompute is not a historical routing snapshot; it uses current combo, health, quota, and scoring state.",
+  ];
+
+  if (log.comboName) {
+    warnings.push(
+      "No shared request correlation id is available yet; fallback ordering is inferred from persisted combo log metadata."
+    );
+  }
+
+  return Array.from(new Set([...warnings, ...comboWarnings]));
+}
+
+async function buildDecisionReplay(log: ExplainLog): Promise<DecisionReplay> {
+  const runtime = buildDecisionReplayRuntime(log);
+  const warnings = buildReplayWarnings(log, []);
+
+  if (!log.comboName) {
+    return {
+      runtime,
+      recompute: null,
+      warnings: [...warnings, "Direct routing has no combo candidate ranking to recompute."],
+    };
+  }
+
+  const combo = await getComboByName(log.comboName);
+  const comboId = comboIdFromRecord(combo);
+  if (!comboId) {
+    return {
+      runtime,
+      recompute: null,
+      warnings: [
+        ...warnings,
+        "Combo definition could not be found; runtime target is shown without recomputed candidates.",
+      ],
+    };
+  }
+
+  const inspector = await buildComboScoringInspectorResponse({
+    range: "24h",
+    horizon: "7d",
+    comboId,
+    taskType: "default",
+  });
+  const inspectorCombo = inspector.combos[0] ?? null;
+  if (!inspectorCombo) {
+    return {
+      runtime,
+      recompute: null,
+      warnings: [
+        ...warnings,
+        "Scoring inspector returned no combo data; runtime target is shown without recomputed candidates.",
+      ],
+    };
+  }
+
+  const runtimeTarget = inspectorCombo.targets.find((target) => targetMatchesRuntime(target, log));
+  const topTarget = inspectorCombo.targets[0] ?? null;
+  const alignment: DecisionReplayAlignment = runtimeTarget
+    ? topTarget?.executionKey === runtimeTarget.executionKey
+      ? "matches_recomputed_top_target"
+      : "differs_from_recomputed_top_target"
+    : "runtime_target_missing_from_recompute";
+  const recomputeWarnings = buildReplayWarnings(log, inspectorCombo.warnings);
+  if (alignment === "differs_from_recomputed_top_target") {
+    recomputeWarnings.push(
+      "Persisted runtime target differs from the target the inspector would rank first now."
+    );
+  } else if (alignment === "runtime_target_missing_from_recompute") {
+    recomputeWarnings.push(
+      "Persisted runtime target could not be matched to current combo targets; combo configuration may have changed."
+    );
+  }
+
+  return {
+    runtime,
+    recompute: {
+      source: "comboScoringInspector",
+      method: inspector.method,
+      exactRuntimeReplay: false,
+      asOf: inspector.asOf,
+      timeRange: "24h",
+      horizon: "7d",
+      comboId: inspectorCombo.comboId,
+      comboName: inspectorCombo.comboName,
+      strategy: inspectorCombo.strategy,
+      taskType: "default",
+      recomputedSelectedExecutionKey: inspectorCombo.selectedExecutionKey,
+      runtimeSelectedRank: runtimeTarget?.rank ?? null,
+      runtimeSelectedScore: runtimeTarget?.score ?? null,
+      alignment,
+      candidates: buildReplayCandidates(inspectorCombo.targets, runtimeTarget),
+      warnings: recomputeWarnings,
+    },
+    warnings: recomputeWarnings,
+  };
+}
+
 async function getRelatedLogs(log: ExplainLog): Promise<ExplainLog[]> {
   const filter: JsonRecord = { limit: 500 };
   if (log.comboName) {
@@ -428,6 +658,7 @@ export async function explainRouteByRequestId(
   );
   const factors = buildFactors(log, targetStats);
   const score = calculateScore(log, targetStats);
+  const decisionReplay = await buildDecisionReplay(log);
   const routeType = log.comboName ? "combo" : "direct";
   const confidence = log.hasPipelineDetails
     ? "high"
@@ -491,5 +722,6 @@ export async function explainRouteByRequestId(
     evidence: buildEvidence(log, targetStats),
     recommendations: buildRecommendations(log, targetStats),
     limitations: buildLimitations(log, relatedTargets),
+    decisionReplay,
   };
 }

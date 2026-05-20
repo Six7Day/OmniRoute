@@ -39,6 +39,77 @@ type ExplainTarget = {
   reason: string;
 };
 
+type ReplayFactor = {
+  key: string;
+  value: number;
+  weight: number;
+  contribution: number;
+  source: string;
+  note?: string;
+};
+
+type ReplayCandidate = {
+  executionKey: string;
+  stepId: string | null;
+  provider: string;
+  model: string;
+  connectionId: string | null;
+  label: string | null;
+  rank: number;
+  score: number;
+  isRuntimeSelected: boolean;
+  wouldSelectNow: boolean;
+  factors: ReplayFactor[];
+  signals: {
+    quotaRemainingPct: number | null;
+    projectedQuotaRemainingPct: number | null;
+    successRate: number | null;
+    avgLatencyMs: number | null;
+    forecastRisk: string | null;
+    autopilotIssueCount: number;
+  };
+};
+
+type DecisionReplay = {
+  runtime: {
+    source: "call_logs";
+    exact: true;
+    selectedCallLogId: string;
+    comboName: string | null;
+    comboStepId: string | null;
+    comboExecutionKey: string | null;
+    provider: string | null;
+    model: string | null;
+    connectionId: string | null;
+    status: number;
+    timestamp: string | null;
+    durationMs: number;
+  };
+  recompute: null | {
+    source: "comboScoringInspector";
+    method: "read_only_recompute";
+    exactRuntimeReplay: false;
+    asOf: string;
+    timeRange: "24h";
+    horizon: "7d";
+    comboId: string;
+    comboName: string;
+    strategy: string;
+    taskType: "default";
+    recomputedSelectedExecutionKey: string | null;
+    runtimeSelectedRank: number | null;
+    runtimeSelectedScore: number | null;
+    alignment:
+      | "matches_recomputed_top_target"
+      | "differs_from_recomputed_top_target"
+      | "runtime_target_missing_from_recompute"
+      | "not_combo_routed";
+    candidates: ReplayCandidate[];
+    warnings: string[];
+  };
+  warnings: string[];
+};
+
 type RouteExplainabilityResponse = {
   requestId: string;
   routeType: "combo" | "direct";
@@ -86,6 +157,7 @@ type RouteExplainabilityResponse = {
   evidence: Array<{ label: string; value: string; tone: ExplanationFactor["status"] }>;
   recommendations: string[];
   limitations: string[];
+  decisionReplay?: DecisionReplay;
 };
 
 function formatDate(value: string | null) {
@@ -209,6 +281,154 @@ function TargetTimeline({ targets }: { targets: ExplainTarget[] }) {
         </div>
       ))}
     </div>
+  );
+}
+
+function replayAlignmentLabel(alignment: NonNullable<DecisionReplay["recompute"]>["alignment"]) {
+  if (alignment === "matches_recomputed_top_target") return "Matches current top target";
+  if (alignment === "differs_from_recomputed_top_target") return "Differs from current top";
+  if (alignment === "runtime_target_missing_from_recompute") return "Target missing now";
+  return "Not combo routed";
+}
+
+function replayAlignmentVariant(alignment: NonNullable<DecisionReplay["recompute"]>["alignment"]) {
+  if (alignment === "matches_recomputed_top_target") return "success" as const;
+  if (alignment === "differs_from_recomputed_top_target") return "warning" as const;
+  if (alignment === "runtime_target_missing_from_recompute") return "error" as const;
+  return "default" as const;
+}
+
+function WhyThisTargetCard({ replay }: { replay: DecisionReplay | undefined }) {
+  if (!replay) return null;
+  const recompute = replay.recompute;
+  const candidates = recompute?.candidates ?? [];
+
+  return (
+    <Card
+      title="Why this target?"
+      subtitle="Exact runtime metadata plus read-only scoring replay"
+      icon="psychology"
+    >
+      <div className="flex flex-col gap-4">
+        <div className="rounded-lg border border-primary/20 bg-primary/5 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-text-main">Exact runtime log</div>
+              <div className="mt-1 truncate text-xs text-text-muted">
+                {replay.runtime.provider || "unknown"} / {replay.runtime.model || "unknown"}
+              </div>
+              <div className="mt-1 text-xs text-text-muted">
+                {formatDate(replay.runtime.timestamp)} · {replay.runtime.comboStepId || "no step"}
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant={getStatusVariant(replay.runtime.status)} size="sm">
+                HTTP {replay.runtime.status || "n/a"}
+              </Badge>
+              <Badge variant="success" size="sm">
+                call_logs exact
+              </Badge>
+            </div>
+          </div>
+        </div>
+
+        {recompute ? (
+          <div className="rounded-lg border border-black/5 bg-black/2 p-4 dark:border-white/5 dark:bg-white/2">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-text-main">Read-only recompute</div>
+                <div className="mt-1 text-xs text-text-muted">
+                  {recompute.comboName} · {recompute.strategy} · {recompute.timeRange} /{" "}
+                  {recompute.horizon}
+                </div>
+              </div>
+              <Badge variant={replayAlignmentVariant(recompute.alignment)} size="sm">
+                {replayAlignmentLabel(recompute.alignment)}
+              </Badge>
+            </div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <RouteMetric
+                icon="leaderboard"
+                label="Runtime rank now"
+                value={recompute.runtimeSelectedRank ? `#${recompute.runtimeSelectedRank}` : "n/a"}
+              />
+              <RouteMetric
+                icon="score"
+                label="Runtime score now"
+                value={
+                  recompute.runtimeSelectedScore !== null
+                    ? `${Math.round(recompute.runtimeSelectedScore * 100)}%`
+                    : "n/a"
+                }
+              />
+              <RouteMetric
+                icon="looks_one"
+                label="Would select now"
+                value={recompute.recomputedSelectedExecutionKey || "n/a"}
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-warning/20 bg-warning/10 p-4 text-sm text-text-muted">
+            No combo candidate ranking can be recomputed for this request.
+          </div>
+        )}
+
+        {candidates.length > 0 ? (
+          <div className="flex flex-col gap-2">
+            {candidates.slice(0, 5).map((candidate) => (
+              <div
+                key={candidate.executionKey}
+                className={cn(
+                  "rounded-lg border p-3",
+                  candidate.isRuntimeSelected
+                    ? "border-primary/30 bg-primary/5"
+                    : "border-black/5 bg-bg dark:border-white/5"
+                )}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-text-main">
+                      <span>#{candidate.rank}</span>
+                      <span className="truncate">
+                        {candidate.provider} / {candidate.model}
+                      </span>
+                      {candidate.isRuntimeSelected ? (
+                        <Badge variant="primary" size="sm">
+                          Runtime
+                        </Badge>
+                      ) : null}
+                      {candidate.wouldSelectNow ? (
+                        <Badge variant="success" size="sm">
+                          Top now
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <div className="mt-1 text-xs text-text-muted">
+                      {candidate.label || candidate.stepId || candidate.executionKey}
+                    </div>
+                  </div>
+                  <Badge size="sm">{Math.round(candidate.score * 100)}%</Badge>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {replay.warnings.length > 0 ? (
+          <ul className="flex flex-col gap-2 text-xs text-text-muted">
+            {replay.warnings.map((warning) => (
+              <li key={warning} className="flex items-start gap-2">
+                <span className="material-symbols-outlined mt-0.5 text-[15px] text-warning">
+                  info
+                </span>
+                <span>{warning}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+    </Card>
   );
 }
 
@@ -421,6 +641,8 @@ export default function RouteExplainabilityTab() {
                 ))}
               </div>
             </Card>
+
+            <WhyThisTargetCard replay={explanation.decisionReplay} />
 
             <Card title="Evidence" icon="fact_check">
               <div className="flex flex-col gap-2">

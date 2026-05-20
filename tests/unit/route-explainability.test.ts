@@ -8,9 +8,11 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "omniroute-route-exp
 process.env.DATA_DIR = TEST_DATA_DIR;
 
 const core = await import("../../src/lib/db/core.ts");
+const combosDb = await import("../../src/lib/db/combos.ts");
 const callLogs = await import("../../src/lib/usage/callLogs.ts");
 const routeExplain = await import("../../src/lib/usage/routeExplain.ts");
 const route = await import("../../src/app/api/usage/route-explain/[id]/route.ts");
+const { normalizeComboStep } = await import("../../src/lib/combos/steps.ts");
 
 type RouteExplainabilityResponse =
   import("../../src/lib/usage/routeExplain.ts").RouteExplainabilityResponse;
@@ -56,6 +58,9 @@ test("route explainability builds a direct-route explanation from call logs", as
   assert.equal(explanation.providerSelected, "openai");
   assert.equal(explanation.modelUsed, "openai/gpt-4o-mini");
   assert.equal(explanation.selectedTarget.status, 200);
+  assert.equal(explanation.decisionReplay.runtime.exact, true);
+  assert.equal(explanation.decisionReplay.runtime.selectedCallLogId, "direct-route-1");
+  assert.equal(explanation.decisionReplay.recompute, null);
   assert.equal(
     explanation.decision.factors.some((factor) => factor.name === "Direct routing"),
     true
@@ -109,6 +114,121 @@ test("route explainability surfaces nearby combo fallback evidence", async () =>
   assert.equal(explanation.fallbacksTriggered.length, 1);
   assert.equal(explanation.fallbacksTriggered[0].id, "combo-failed-step");
   assert.equal(explanation.targetStats.successRate, 100);
+});
+
+test("route explainability replays why a combo target was selected", async () => {
+  const comboInput = {
+    name: "route-replay-auto",
+    strategy: "auto",
+    models: [
+      {
+        kind: "model",
+        providerId: "openai",
+        model: "openai/gpt-4o-mini",
+        connectionId: "route-replay-fast",
+        label: "Fast target",
+      },
+      {
+        kind: "model",
+        providerId: "anthropic",
+        model: "anthropic/claude-3-haiku",
+        connectionId: "route-replay-slow",
+        label: "Slow target",
+      },
+    ],
+  };
+  await combosDb.createCombo(comboInput);
+  const fastStep = normalizeComboStep(comboInput.models[0], {
+    comboName: comboInput.name,
+    index: 0,
+  });
+  const slowStep = normalizeComboStep(comboInput.models[1], {
+    comboName: comboInput.name,
+    index: 1,
+  });
+
+  await callLogs.saveCallLog({
+    id: "route-replay-selected",
+    timestamp: new Date().toISOString(),
+    method: "POST",
+    path: "/v1/chat/completions",
+    status: 200,
+    model: "openai/gpt-4o-mini",
+    requestedModel: comboInput.name,
+    provider: "openai",
+    connectionId: "route-replay-fast",
+    duration: 120,
+    tokens: { prompt_tokens: 100, completion_tokens: 50 },
+    comboName: comboInput.name,
+    comboStepId: fastStep.id,
+    comboExecutionKey: fastStep.id,
+  });
+  await callLogs.saveCallLog({
+    id: "route-replay-related",
+    timestamp: new Date().toISOString(),
+    method: "POST",
+    path: "/v1/chat/completions",
+    status: 503,
+    model: "anthropic/claude-3-haiku",
+    requestedModel: comboInput.name,
+    provider: "anthropic",
+    connectionId: "route-replay-slow",
+    duration: 2_000,
+    tokens: { prompt_tokens: 100, completion_tokens: 0 },
+    comboName: comboInput.name,
+    comboStepId: slowStep.id,
+    comboExecutionKey: slowStep.id,
+  });
+
+  const explanation = await routeExplain.explainRouteByRequestId("route-replay-selected");
+
+  assert.ok(explanation);
+  assert.equal(explanation.decisionReplay.runtime.source, "call_logs");
+  assert.equal(explanation.decisionReplay.recompute?.method, "read_only_recompute");
+  assert.equal(explanation.decisionReplay.recompute?.exactRuntimeReplay, false);
+  assert.equal(explanation.decisionReplay.recompute?.runtimeSelectedRank, 1);
+  assert.equal(explanation.decisionReplay.recompute?.alignment, "matches_recomputed_top_target");
+  assert.equal(
+    explanation.decisionReplay.recompute?.candidates.some(
+      (candidate) => candidate.executionKey === fastStep.id && candidate.isRuntimeSelected
+    ),
+    true
+  );
+});
+
+test("route explainability warns when replay recomputes a non-auto combo", async () => {
+  const comboInput = {
+    name: "route-replay-priority",
+    strategy: "priority",
+    models: ["openai/gpt-4o-mini"],
+  };
+  await combosDb.createCombo(comboInput);
+  const step = normalizeComboStep(comboInput.models[0], {
+    comboName: comboInput.name,
+    index: 0,
+  });
+
+  await callLogs.saveCallLog({
+    id: "route-replay-priority-selected",
+    timestamp: new Date().toISOString(),
+    status: 200,
+    model: "openai/gpt-4o-mini",
+    requestedModel: comboInput.name,
+    provider: "openai",
+    duration: 200,
+    comboName: comboInput.name,
+    comboStepId: step.id,
+    comboExecutionKey: step.id,
+  });
+
+  const explanation = await routeExplain.explainRouteByRequestId("route-replay-priority-selected");
+
+  assert.ok(explanation);
+  assert.equal(explanation.decisionReplay.recompute?.strategy, "priority");
+  assert.equal(
+    explanation.decisionReplay.recompute?.warnings.some((warning) => warning.includes("not auto")),
+    true
+  );
 });
 
 test("route explainability API returns a routing decision document", async () => {
