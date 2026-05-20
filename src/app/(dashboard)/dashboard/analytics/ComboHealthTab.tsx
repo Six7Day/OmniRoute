@@ -783,6 +783,9 @@ export default function ComboHealthTab() {
         setLoading(true);
       }
       setError(null);
+      setForecastError(null);
+      setAutopilotError(null);
+      setScoringError(null);
 
       try {
         const [response, forecastResponse, autopilotResponse, scoringResponse] = await Promise.all([

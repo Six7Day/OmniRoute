@@ -103,6 +103,23 @@ test("route explainability surfaces nearby combo fallback evidence", async () =>
     comboExecutionKey: "step-anthropic",
     pipelinePayloads: { clientRequest: { model: "coding-combo" } },
   });
+  await callLogs.saveCallLog({
+    id: "combo-distant-step",
+    timestamp: "2026-05-20T13:00:00.000Z",
+    method: "POST",
+    path: "/v1/chat/completions",
+    status: 503,
+    model: "openai/gpt-4o-mini",
+    requestedModel: "coding-combo",
+    provider: "openai",
+    connectionId: "conn-openai-a",
+    duration: 800,
+    tokens: { input: 100, output: 0 },
+    comboName: "coding-combo",
+    comboStepId: "step-openai-distant",
+    comboExecutionKey: "step-openai-distant",
+    error: "outside explainability window",
+  });
 
   const explanation = await routeExplain.explainRouteByRequestId("combo-selected-step");
 
@@ -111,6 +128,10 @@ test("route explainability surfaces nearby combo fallback evidence", async () =>
   assert.equal(explanation.comboUsed, "coding-combo");
   assert.equal(explanation.confidence, "high");
   assert.equal(explanation.relatedTargets.length, 2);
+  assert.equal(
+    explanation.relatedTargets.some((target) => target.id === "combo-distant-step"),
+    false
+  );
   assert.equal(explanation.fallbacksTriggered.length, 1);
   assert.equal(explanation.fallbacksTriggered[0].id, "combo-failed-step");
   assert.equal(explanation.targetStats.successRate, 100);

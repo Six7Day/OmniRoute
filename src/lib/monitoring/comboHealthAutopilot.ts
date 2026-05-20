@@ -435,17 +435,6 @@ export async function buildComboHealthAutopilotReport(
     providerHealth.providers.flatMap((provider) => provider.issues as ProviderIssueView[])
   );
 
-  const combos = health.combos
-    .map((combo) =>
-      buildAutopilotCombo(
-        combo,
-        forecastsByComboId.get(combo.comboId),
-        providerIssues,
-        includeActions
-      )
-    )
-    .filter((combo) => includeHealthy || combo.state !== "healthy");
-
   const allCombos = health.combos.map((combo) =>
     buildAutopilotCombo(
       combo,
@@ -454,6 +443,9 @@ export async function buildComboHealthAutopilotReport(
       includeActions
     )
   );
+  const combos = includeHealthy
+    ? allCombos
+    : allCombos.filter((combo) => combo.state !== "healthy");
   const downCount = allCombos.filter((combo) => combo.state === "down").length;
   const degradedCount = allCombos.filter((combo) => combo.state === "degraded").length;
   const healthyCount = allCombos.filter((combo) => combo.state === "healthy").length;

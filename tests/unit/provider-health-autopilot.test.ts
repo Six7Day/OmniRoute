@@ -203,6 +203,21 @@ test("provider health autopilot action rejects cross-site mutations", async () =
   assert.ok(unchanged.rateLimitedUntil);
 });
 
+test("provider health autopilot action rejects malformed JSON", async () => {
+  await enableManagementAuth();
+
+  const response = await actionsRoute.POST(
+    await makeManagementSessionRequest("http://localhost/api/providers/health-autopilot/actions", {
+      method: "POST",
+      body: "{not-json",
+    })
+  );
+
+  assert.equal(response.status, 400);
+  const body = await response.json();
+  assert.equal(body.error.message, "Invalid JSON body");
+});
+
 test("provider health autopilot action route is always protected", () => {
   assert.equal(routeGuard.isAlwaysProtectedPath("/api/providers/health-autopilot/actions"), true);
 });

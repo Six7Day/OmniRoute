@@ -617,7 +617,13 @@ async function buildDecisionReplay(log: ExplainLog): Promise<DecisionReplay> {
 }
 
 async function getRelatedLogs(log: ExplainLog): Promise<ExplainLog[]> {
-  const filter: JsonRecord = { limit: 500 };
+  const selectedTime = log.timestamp ? new Date(log.timestamp).getTime() : 0;
+  const windowMs = 15 * 60 * 1000;
+  const filter: JsonRecord = { limit: 200 };
+  if (Number.isFinite(selectedTime) && selectedTime > 0) {
+    filter.since = new Date(selectedTime - windowMs).toISOString();
+    filter.until = new Date(selectedTime + windowMs).toISOString();
+  }
   if (log.comboName) {
     filter.combo = "1";
     filter.search = log.comboName;
@@ -627,8 +633,6 @@ async function getRelatedLogs(log: ExplainLog): Promise<ExplainLog[]> {
 
   const rawLogs = await getCallLogs(filter);
   const logs = rawLogs.map(asExplainLog).filter((entry): entry is ExplainLog => entry !== null);
-  const selectedTime = log.timestamp ? new Date(log.timestamp).getTime() : 0;
-  const windowMs = 15 * 60 * 1000;
 
   return logs.filter((entry) => {
     if (entry.id === log.id) return true;
