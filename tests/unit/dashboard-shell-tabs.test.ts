@@ -6,15 +6,29 @@ function readSource(relativePath: string) {
   return readFileSync(new URL("../../" + relativePath, import.meta.url), "utf8");
 }
 
-test("analytics page exposes the restored five-tab shell", () => {
+test("analytics page exposes the restored analytics tab shell", () => {
   const source = readSource("src/app/(dashboard)/dashboard/analytics/page.tsx");
 
   assert.ok(source.includes('role="tablist"'));
   assert.ok(source.includes('aria-label="Analytics sections"'));
-  for (const label of ["Overview", "Evals", "Search", "Utilization", "Combo Health"]) {
+  for (const label of [
+    "Overview",
+    "Evals",
+    "Search",
+    "Utilization",
+    "Combo Health",
+    "Route Explainability",
+  ]) {
     assert.ok(source.includes('label: "' + label + '"'));
   }
-  for (const tabId of ["overview", "evals", "search", "utilization", "combo-health"]) {
+  for (const tabId of [
+    "overview",
+    "evals",
+    "search",
+    "utilization",
+    "combo-health",
+    "route-explain",
+  ]) {
     assert.ok(source.includes('id: "' + tabId + '"'));
   }
 });

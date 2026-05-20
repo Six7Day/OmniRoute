@@ -7,10 +7,17 @@ import { cn } from "@/shared/utils/cn";
 import EvalsTab from "../usage/components/EvalsTab";
 import ComboHealthTab from "./ComboHealthTab";
 import ProviderUtilizationTab from "./ProviderUtilizationTab";
+import RouteExplainabilityTab from "./RouteExplainabilityTab";
 import SearchAnalyticsTab from "./SearchAnalyticsTab";
 import DiversityScoreCard from "./components/DiversityScoreCard";
 
-type AnalyticsTab = "overview" | "evals" | "search" | "utilization" | "combo-health";
+type AnalyticsTab =
+  | "overview"
+  | "evals"
+  | "search"
+  | "utilization"
+  | "combo-health"
+  | "route-explain";
 
 const ANALYTICS_TABS: Array<{ id: AnalyticsTab; label: string; icon: string }> = [
   { id: "overview", label: "Overview", icon: "analytics" },
@@ -18,6 +25,7 @@ const ANALYTICS_TABS: Array<{ id: AnalyticsTab; label: string; icon: string }> =
   { id: "search", label: "Search", icon: "travel_explore" },
   { id: "utilization", label: "Utilization", icon: "monitoring" },
   { id: "combo-health", label: "Combo Health", icon: "health_and_safety" },
+  { id: "route-explain", label: "Route Explainability", icon: "alt_route" },
 ];
 
 export default function AnalyticsPage() {
@@ -68,6 +76,7 @@ export default function AnalyticsPage() {
         {activeTab === "search" ? <SearchAnalyticsTab /> : null}
         {activeTab === "utilization" ? <ProviderUtilizationTab /> : null}
         {activeTab === "combo-health" ? <ComboHealthTab /> : null}
+        {activeTab === "route-explain" ? <RouteExplainabilityTab /> : null}
       </Suspense>
     </div>
   );
