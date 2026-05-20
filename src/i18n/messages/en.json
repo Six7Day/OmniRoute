@@ -4663,6 +4663,8 @@
     "lastUsed": "Last Refreshed",
     "actions": "Actions",
     "refreshQuota": "Refresh quota",
+    "editCutoffs": "Edit cutoffs",
+    "forceRefresh": "Refresh now",
     "today": "Today",
     "tomorrow": "Tomorrow",
     "dayTimeFormat": "{day}, {time}",
