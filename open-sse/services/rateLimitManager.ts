@@ -247,9 +247,18 @@ function shutdownLimiters(): void {
 
 function trackAsyncOperation<T>(promise: Promise<T>): Promise<T> {
   pendingAsyncOperations.add(promise);
-  promise.finally(() => {
-    pendingAsyncOperations.delete(promise);
-  });
+  // Do not use a fire-and-forget `.finally()` here: it creates a derived
+  // Promise that mirrors rejections from `promise`. When the caller intentionally
+  // tracks a background cleanup without awaiting it, that derived Promise can be
+  // reported as an unhandled rejection during Node's test-runner IPC teardown.
+  void promise.then(
+    () => {
+      pendingAsyncOperations.delete(promise);
+    },
+    () => {
+      pendingAsyncOperations.delete(promise);
+    }
+  );
   return promise;
 }
 
@@ -569,6 +578,7 @@ export function updateFromHeaders(provider, connectionId, headers, status, model
     // Without disconnect() here, every 429 leaks a heartbeat timer until GC reclaims
     // the abandoned Bottleneck; under sustained quota pressure that is a real leak.
     limiters.delete(limiterKey);
+    lastDispatchAt.delete(limiterKey);
     trackAsyncOperation(limiter.disconnect());
     return;
   }
