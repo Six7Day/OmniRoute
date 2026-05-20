@@ -1147,6 +1147,7 @@ export function checkFallbackError(
     // use COOLDOWN_MS.paymentRequired here — that constant is 2 minutes,
     // which is shorter than the recovery time of a subscription quota.)
     if (
+      profile?.useUpstreamRetryHints &&
       shouldUseQuotaSignal &&
       !isCreditsExhausted(errorStr) &&
       !isDailyQuotaExhausted(errorStr) &&
@@ -1157,7 +1158,7 @@ export function checkFallbackError(
       // We honor it even when the resilience profile does not opt-in to
       // generic upstream retry hints — a subscription quota has a
       // definite recovery time, not a best-effort transient backoff.
-      const hintMs = getUpstreamRetryHintMs() ?? parseRetryFromErrorText(errorStr) ?? null;
+      const hintMs = getUpstreamRetryHintMs();
       const SUBSCRIPTION_QUOTA_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
       return {
         shouldFallback: true,
