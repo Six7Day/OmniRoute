@@ -25,7 +25,6 @@
     "pack": "npm run prepare:bundle && electron-builder --dir"
   },
   "dependencies": {
-    "better-sqlite3": "^12.10.0",
     "electron-updater": "^6.8.6"
   },
   "devDependencies": {
@@ -52,6 +51,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "sqlite-inspection.js",
       "package.json",
       "node_modules/**/*"
     ],
