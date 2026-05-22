@@ -13,9 +13,20 @@ function formatPercent(value) {
   return `${Number(value ?? 0).toFixed(2)}%`;
 }
 
+function parseThreshold(name, fallbackValue) {
+  const rawValue = getArg(name, fallbackValue);
+  const value = Number(rawValue);
+  if (!Number.isFinite(value)) {
+    console.error(`Invalid coverage threshold for ${name}: ${rawValue}`);
+    process.exit(1);
+  }
+  return value;
+}
+
 const inputPath = getArg("--input", "coverage/coverage-summary.json");
 const outputPath = getArg("--output", "");
-const defaultThreshold = Number(getArg("--threshold", "60"));
+const hasGlobalThreshold = process.argv.includes("--threshold");
+const defaultThreshold = parseThreshold("--threshold", "75");
 
 if (!existsSync(inputPath)) {
   console.error(`Coverage summary file not found: ${inputPath}`);
@@ -31,7 +42,10 @@ const metrics = [
   ["branches", "Branches"],
 ];
 const thresholds = Object.fromEntries(
-  metrics.map(([metric]) => [metric, Number(getArg(`--${metric}`, String(defaultThreshold)))])
+  metrics.map(([metric]) => {
+    const fallback = metric === "branches" && !hasGlobalThreshold ? "70" : String(defaultThreshold);
+    return [metric, parseThreshold(`--${metric}`, fallback)];
+  })
 );
 
 const total = summary.total ?? {};

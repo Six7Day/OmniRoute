@@ -19,6 +19,10 @@ env:
   CI_NODE_VERSION: "24"
   CI_NODE_24_VERSION: "24"
   CI_NODE_26_VERSION: "26"
+  COV_STATEMENTS: "75"
+  COV_LINES: "75"
+  COV_FUNCTIONS: "75"
+  COV_BRANCHES: "70"
 
 jobs:
   lint:
@@ -288,11 +292,14 @@ jobs:
 
   test-coverage:
     name: Coverage
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: test-coverage-shard
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.CI_NODE_VERSION }}
@@ -329,14 +336,15 @@ jobs:
             --exclude='tests/**' \
             --exclude='**/*.test.*' \
             --reporter=text-summary \
+            --reporter=html \
             --reporter=json-summary \
             --reporter=lcov \
             --merge-async \
             --check-coverage \
-            --statements 75 \
-            --lines 75 \
-            --functions 75 \
-            --branches 70
+            --statements "$COV_STATEMENTS" \
+            --lines "$COV_LINES" \
+            --functions "$COV_FUNCTIONS" \
+            --branches "$COV_BRANCHES"
       - name: Build coverage summary
         if: always()
         run: |
@@ -345,10 +353,10 @@ jobs:
             node scripts/check/test-report-summary.mjs \
               --input coverage/coverage-summary.json \
               --output coverage/coverage-report.md \
-              --statements 75 \
-              --lines 75 \
-              --functions 75 \
-              --branches 70
+              --statements "$COV_STATEMENTS" \
+              --lines "$COV_LINES" \
+              --functions "$COV_FUNCTIONS" \
+              --branches "$COV_BRANCHES"
           else
             printf '%s\n' \
               '# Coverage Report' \
