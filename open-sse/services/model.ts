@@ -438,6 +438,15 @@ async function resolveModelByProviderInference(modelId: string, extendedContext:
     };
   }
 
+  // Fallback for newly released OpenAI-family model IDs that may not be in the local catalog yet.
+  if (/^gpt-/i.test(modelId) || /^o1/i.test(modelId) || /^o3/i.test(modelId)) {
+    return {
+      provider: "openai",
+      model: modelId,
+      extendedContext,
+    };
+  }
+
   const candidatesToUse = nonOpenAIProviders;
 
   if (candidatesToUse.length === 1) {

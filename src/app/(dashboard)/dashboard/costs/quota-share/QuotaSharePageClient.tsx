@@ -339,7 +339,8 @@ export default function QuotaSharePageClient() {
       <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-700 dark:text-amber-300 flex items-start gap-2">
         <span className="material-symbols-outlined text-[18px] shrink-0">science</span>
         <div>
-          <strong>{t("betaTitle")}</strong> {t("betaDescription")}
+          <strong>{t("betaPreviewLabel")}</strong> {t("betaConfigSavedPrefix")}{" "}
+          <code>localStorage</code> {t("betaConfigSavedSuffix")}
         </div>
       </div>
 
@@ -595,7 +596,7 @@ function PoolCard({
           <div className="mt-3 flex items-center justify-between gap-2 flex-wrap text-[11px]">
             <div className="flex items-center gap-1">
               <span className="text-text-muted font-semibold uppercase tracking-wide">
-                {t("policy")}:
+                {t("policyLabel")}
               </span>
               {(["hard", "soft", "burst"] as PoolPolicy[]).map((p) => (
                 <button

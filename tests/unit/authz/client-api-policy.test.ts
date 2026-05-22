@@ -94,16 +94,16 @@ test("clientApiPolicy: dashboard session can read the model catalog without bear
   }
 });
 
-test("clientApiPolicy: dashboard session does not bypass non-catalog client API auth", async () => {
+test("clientApiPolicy: dashboard session is accepted for client API routes without bearer", async () => {
   const policy = await loadPolicy();
   const out = await policy.evaluate(
     ctx(new Headers({ cookie: await dashboardCookie() }), "POST", "/api/v1/chat/completions")
   );
 
-  assert.equal(out.allow, false);
-  if (!out.allow) {
-    assert.equal(out.status, 401);
-    assert.equal(out.code, "AUTH_002");
+  assert.equal(out.allow, true);
+  if (out.allow) {
+    assert.equal(out.subject.kind, "dashboard_session");
+    assert.equal(out.subject.id, "dashboard");
   }
 });
 
@@ -153,6 +153,20 @@ test("clientApiPolicy: environment API key remains accepted for client API route
   assert.equal(out.allow, true);
   if (out.allow) {
     assert.equal(out.subject.kind, "client_api_key");
+  }
+});
+
+test("clientApiPolicy: x-api-key header is accepted as client_api_key subject", async () => {
+  const created = await apiKeysDb.createApiKey("policy-test-xkey", "machine-xkey-1234");
+  assert.ok(created?.key, "createApiKey must return a key");
+
+  const policy = await loadPolicy();
+  const headers = new Headers({ "x-api-key": created.key });
+  const out = await policy.evaluate(ctx(headers));
+  assert.equal(out.allow, true);
+  if (out.allow) {
+    assert.equal(out.subject.kind, "client_api_key");
+    assert.match(out.subject.id, /^key_/);
   }
 });
 

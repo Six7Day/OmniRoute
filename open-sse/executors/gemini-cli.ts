@@ -133,11 +133,24 @@ export class GeminiCLIExecutor extends BaseExecutor {
     model?: string
   ) {
     void clientHeaders;
+
+    // Fallback to internal tracker if model not explicitly passed (matches older interface calls)
+    const activeModel = model || this._currentModel || "unknown";
+
     const raw = getGeminiCliHeaders(
-      normalizeGeminiModel(model || "unknown"),
+      normalizeGeminiModel(activeModel),
       credentials.accessToken,
       stream ? "*/*" : "application/json"
     );
+
+    if (credentials.apiKey) {
+      raw["x-goog-api-key"] = credentials.apiKey;
+      // getGeminiCliHeaders adds Authorization: Bearer undefined if accessToken is empty, so we clean it up
+      if (!credentials.accessToken) {
+        delete raw["Authorization"];
+      }
+    }
+
     return scrubProxyAndFingerprintHeaders(raw);
   }
 
@@ -313,12 +326,10 @@ export class GeminiCLIExecutor extends BaseExecutor {
     const storedProject =
       bodyRecord.project ||
       credentials.projectId ||
-      (credentials.providerSpecificData as Record<string, unknown>)?.projectId ||
-      "";
+      (credentials.providerSpecificData as Record<string, unknown>)?.projectId;
 
     const envelope: Record<string, any> = {
       model: currentModel,
-      project: storedProject,
       user_prompt_id: bodyRecord.user_prompt_id || generateGeminiCliRequestId(),
       request: {
         ...requestRecord,
@@ -326,8 +337,12 @@ export class GeminiCLIExecutor extends BaseExecutor {
       },
     };
 
+    if (typeof storedProject === "string" ? storedProject.trim() : storedProject) {
+      envelope.project = storedProject;
+    }
+
     for (const [key, value] of Object.entries(bodyRecord)) {
-      if (!(key in envelope) && key !== "request") {
+      if (!(key in envelope) && key !== "request" && key !== "project") {
         envelope[key] = value;
       }
     }

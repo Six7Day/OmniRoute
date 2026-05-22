@@ -3,6 +3,10 @@ import assert from "node:assert/strict";
 
 const usageService = await import("../../open-sse/services/usage.ts");
 const { __testing } = usageService;
+const { getAntigravityLoadCodeAssistMetadata } =
+  await import("../../open-sse/services/antigravityHeaders.ts");
+const { getAntigravityFetchAvailableModelsUrls } =
+  await import("../../open-sse/config/antigravityUpstream.ts");
 
 const originalFetch = globalThis.fetch;
 const originalCreditsMode = process.env.ANTIGRAVITY_CREDITS;
@@ -296,7 +300,7 @@ test("usage service covers Antigravity quota parsing, exclusions and forbidden a
             "gemini-unlimited": {
               quotaInfo: {},
             },
-            "gemini-3.1-pro-high": {
+            "gemini-pro-agent": {
               quotaInfo: { remainingFraction: 1 },
             },
             "internal-model": {
@@ -318,18 +322,19 @@ test("usage service covers Antigravity quota parsing, exclusions and forbidden a
   });
 
   assert.equal(usage.plan, "Ultra");
-  assert.deepEqual(Object.keys(usage.quotas).sort(), ["claude-sonnet-4-6", "gemini-3.1-pro-high"]);
+  assert.deepEqual(Object.keys(usage.quotas).sort(), ["claude-sonnet-4-6", "gemini-pro-agent"]);
   assert.equal(usage.quotas["claude-sonnet-4-6"].used, 600);
-  assert.equal(usage.quotas["gemini-3.1-pro-high"].total, 0);
-  assert.equal(usage.quotas["gemini-3.1-pro-high"].remainingPercentage, 100);
+  assert.equal(usage.quotas["gemini-pro-agent"].total, 0);
+  assert.equal(usage.quotas["gemini-pro-agent"].remainingPercentage, 100);
   const loadCodeAssistCall = calls.find((call) => call.url.includes("loadCodeAssist"));
   assert.match(loadCodeAssistCall?.url, /daily-cloudcode-pa\.sandbox\.googleapis\.com/);
   assert.match(loadCodeAssistCall?.init.headers["User-Agent"], /^vscode\/1\.X\.X \(Antigravity\//);
   assert.equal(loadCodeAssistCall?.init.headers["X-Goog-Api-Client"], undefined);
   assert.equal(loadCodeAssistCall?.init.headers["Client-Metadata"], undefined);
-  assert.deepEqual(JSON.parse(loadCodeAssistCall?.init.body).metadata, {
-    ideType: "ANTIGRAVITY",
-  });
+  assert.deepEqual(
+    JSON.parse(loadCodeAssistCall?.init.body).metadata,
+    getAntigravityLoadCodeAssistMetadata()
+  );
 
   globalThis.fetch = async (url) => {
     if (String(url).includes("loadCodeAssist")) {
@@ -347,6 +352,8 @@ test("usage service covers Antigravity quota parsing, exclusions and forbidden a
 
 test("usage service retries Antigravity fetchAvailableModels across the shared fallback order", async () => {
   const calls: any[] = [];
+  const expectedQuotaUrls = getAntigravityFetchAvailableModelsUrls();
+  const finalQuotaUrl = expectedQuotaUrls.at(-1);
 
   globalThis.fetch = async (url, init = {}) => {
     calls.push({ url: String(url), init });
@@ -361,16 +368,9 @@ test("usage service retries Antigravity fetchAvailableModels across the shared f
       );
     }
 
-    try {
-      const parsedUrl = new URL(String(url));
-      if (parsedUrl.hostname === "daily-cloudcode-pa.sandbox.googleapis.com") {
-        return new Response("bad gateway", { status: 502 });
-      }
-      if (parsedUrl.hostname === "daily-cloudcode-pa.googleapis.com") {
-        return new Response("bad gateway", { status: 502 });
-      }
-    } catch {
-      // Ignore invalid URLs
+    const urlString = String(url);
+    if (expectedQuotaUrls.includes(urlString) && urlString !== finalQuotaUrl) {
+      return new Response("bad gateway", { status: 502 });
     }
 
     return new Response(
@@ -396,11 +396,7 @@ test("usage service retries Antigravity fetchAvailableModels across the shared f
   const quotaCalls = calls.filter((call) => call.url.includes("fetchAvailableModels"));
   assert.deepEqual(
     quotaCalls.map((call) => call.url),
-    [
-      "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:fetchAvailableModels",
-      "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
-      "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
-    ]
+    expectedQuotaUrls
   );
   assert.match(quotaCalls[2].init.headers["User-Agent"], /^Antigravity\//);
   assert.equal(usage.plan, "Business");

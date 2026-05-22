@@ -98,6 +98,7 @@ export async function getSettings() {
     hideEndpointNgrokTunnel: false,
     comboConfigMode: "guided",
     codexServiceTier: { enabled: false },
+    claudeFastMode: { enabled: false, supportedModels: ["claude-opus-4-7", "claude-opus-4-6"] },
     codexSessionAffinityTtlMs: 0,
     alwaysPreserveClientCache: "auto",
     idempotencyWindowMs: 5000,

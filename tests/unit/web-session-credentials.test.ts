@@ -27,11 +27,23 @@ test("web session credential metadata identifies cookie, token, and no-auth prov
     placeholder: "access_token=... or a DevTools HAR export",
     acceptsFullCookieHeader: false,
   });
+  assert.deepEqual(webSessionCredentials.getWebSessionCredentialRequirement("deepseek-web"), {
+    kind: "token",
+    credentialName: "userToken",
+    placeholder: "userToken=... or paste raw userToken",
+    acceptsFullCookieHeader: false,
+  });
   assert.deepEqual(webSessionCredentials.getWebSessionCredentialRequirement("veoaifree-web"), {
     kind: "none",
     credentialName: "",
     placeholder: "",
     acceptsFullCookieHeader: false,
+  });
+  assert.deepEqual(webSessionCredentials.getWebSessionCredentialRequirement("t3-web"), {
+    kind: "cookie",
+    credentialName: "convex-session-id + Cookie header",
+    placeholder: "convex-session-id=abc123...; Cookie: ...",
+    acceptsFullCookieHeader: true,
   });
 });
 

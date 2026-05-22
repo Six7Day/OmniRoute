@@ -17,6 +17,7 @@ import { pipeline } from "node:stream/promises";
 import { resolveDataDir } from "../data-dir.mjs";
 import { getBaseUrl, isServerUp } from "../api.mjs";
 import { t } from "../i18n.mjs";
+import { backupSqliteFile } from "../sqlite.mjs";
 import { CLI_TOKEN_HEADER, getCliToken } from "../utils/cliToken.mjs";
 
 function getBackupDir() {
@@ -207,13 +208,6 @@ export async function runBackupCommand(opts = {}) {
   try {
     if (!existsSync(backupDir)) mkdirSync(backupDir, { recursive: true });
 
-    let Database;
-    try {
-      Database = (await import("better-sqlite3")).default;
-    } catch {
-      Database = null;
-    }
-
     let backedUp = 0;
     let skipped = 0;
 
@@ -227,14 +221,11 @@ export async function runBackupCommand(opts = {}) {
         const destName = opts.encrypt ? `${file.name}.enc` : file.name;
         const destPath = join(backupPath, destName);
         mkdirSync(dirname(destPath), { recursive: true });
-        if (file.name.endsWith(".sqlite") && Database) {
-          const db = new Database(sourcePath, { readonly: true });
+        if (file.name.endsWith(".sqlite")) {
           const tmpPath = destPath.replace(/\.enc$/, "");
-          await db.backup(tmpPath);
-          db.close();
+          await backupSqliteFile(sourcePath, tmpPath);
           if (opts.encrypt) {
             await encryptFile(tmpPath, destPath, passphrase);
-            const { unlinkSync } = await import("node:fs");
             unlinkSync(tmpPath);
           }
         } else if (opts.encrypt) {

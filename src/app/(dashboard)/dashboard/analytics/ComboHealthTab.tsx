@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import Card from "@/shared/components/Card";
 import Badge from "@/shared/components/Badge";
 import { Skeleton, Spinner } from "@/shared/components/Loading";
@@ -486,6 +487,8 @@ function ComboHealthCard({
   autopilot?: ComboAutopilotCombo;
   scoringInspector?: ComboScoringInspectorCombo;
 }) {
+  const t = useTranslations("analytics");
+
   const sortedDistribution = useMemo(
     () =>
       [...combo.usageSkew.modelDistribution].sort(
@@ -518,18 +521,18 @@ function ComboHealthCard({
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:min-w-105">
             <MetricBlock
               icon="battery_status_good"
-              label="Worst quota left"
+              label={t("comboHealthWorstQuotaLeft")}
               value={formatPercent(combo.quotaHealth.worstRemainingPct)}
             />
             <MetricBlock
               icon="balance"
-              label="Usage skew"
+              label={t("comboHealthUsageSkew")}
               value={combo.usageSkew.giniCoefficient.toFixed(2)}
               subValue="Gini coefficient"
             />
             <MetricBlock
               icon="bolt"
-              label="Success rate"
+              label={t("comboHealthSuccessRate")}
               value={formatPercent(combo.performance.successRate * 100, 1)}
               subValue={`${combo.performance.totalRequests.toLocaleString()} requests`}
             />
@@ -540,7 +543,9 @@ function ComboHealthCard({
       <div className="grid gap-6 px-6 py-5 xl:grid-cols-[1.1fr_1fr_0.95fr]">
         <section className="flex flex-col gap-4">
           <div>
-            <div className="text-sm font-semibold text-text-main">Quota health</div>
+            <div className="text-sm font-semibold text-text-main">
+              {t("comboHealthQuotaHealth")}
+            </div>
             <div className="mt-1 text-xs text-text-muted">
               Lowest remaining quota across providers with short trend signals.
             </div>
@@ -588,7 +593,7 @@ function ComboHealthCard({
 
         <section className="flex flex-col gap-4">
           <div>
-            <div className="text-sm font-semibold text-text-main">Usage skew</div>
+            <div className="text-sm font-semibold text-text-main">{t("comboHealthUsageSkew")}</div>
             <div className="mt-1 text-xs text-text-muted">
               Model request share and token share within this combo.
             </div>
@@ -613,12 +618,12 @@ function ComboHealthCard({
 
                 <div className="mt-3 grid gap-2">
                   <DistributionBar
-                    label="Requests"
+                    label={t("comboHealthRequests")}
                     value={entry.requestShare}
                     meta={formatShare(entry.requestShare)}
                   />
                   <DistributionBar
-                    label="Tokens"
+                    label={t("comboHealthTokens")}
                     value={entry.tokenShare}
                     meta={formatShare(entry.tokenShare)}
                   />
@@ -639,17 +644,17 @@ function ComboHealthCard({
           <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
             <MetricBlock
               icon="timer"
-              label="Avg latency"
+              label={t("comboHealthAvgLatency")}
               value={formatLatency(combo.performance.avgLatencyMs)}
             />
             <MetricBlock
               icon="task_alt"
-              label="Success rate"
+              label={t("comboHealthSuccessRate")}
               value={formatPercent(combo.performance.successRate * 100, 1)}
             />
             <MetricBlock
               icon="stacked_line_chart"
-              label="Total requests"
+              label={t("comboHealthTotalRequests")}
               value={combo.performance.totalRequests.toLocaleString()}
             />
           </div>
@@ -659,7 +664,9 @@ function ComboHealthCard({
       {targetHealth.length > 0 ? (
         <div className="border-t border-black/5 px-6 py-5 dark:border-white/5">
           <div>
-            <div className="text-sm font-semibold text-text-main">Execution targets</div>
+            <div className="text-sm font-semibold text-text-main">
+              {t("comboHealthExecutionTargets")}
+            </div>
             <div className="mt-1 text-xs text-text-muted">
               Step-level runtime metrics and quota visibility for structured combo targets.
             </div>
@@ -696,17 +703,17 @@ function ComboHealthCard({
 
                 <div className="mt-3 grid gap-2 sm:grid-cols-3">
                   <DistributionBar
-                    label="Success"
+                    label={t("comboHealthSuccess")}
                     value={Math.max(target.successRate, 0) / 100}
                     meta={formatPercent(target.successRate, 0)}
                   />
                   <DistributionBar
-                    label="Latency"
+                    label={t("comboHealthLatency")}
                     value={target.avgLatencyMs > 0 ? 1 : 0}
                     meta={formatLatency(target.avgLatencyMs)}
                   />
                   <DistributionBar
-                    label="Quota"
+                    label={t("comboHealthQuota")}
                     value={Math.max(target.quotaRemainingPct || 0, 0) / 100}
                     meta={formatPercentOrDash(target.quotaRemainingPct)}
                   />
@@ -764,6 +771,7 @@ function ComboHealthSkeleton() {
 }
 
 export default function ComboHealthTab() {
+  const t = useTranslations("analytics");
   const [range, setRange] = useState<UtilizationTimeRange>("24h");
   const [horizon, setHorizon] = useState<ComboForecastHorizon>("30d");
   const [data, setData] = useState<ComboHealthResponse | null>(null);
@@ -855,7 +863,7 @@ export default function ComboHealthTab() {
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-4 rounded-xl border border-black/5 bg-surface p-5 shadow-sm dark:border-white/5 md:flex-row md:items-center md:justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-text-main">Combo health</h2>
+          <h2 className="text-lg font-semibold text-text-main">{t("comboHealthTitle")}</h2>
           <p className="mt-1 text-sm text-text-muted">
             Monitor quota pressure, skewed model usage, and delivery performance by combo.
           </p>
@@ -916,7 +924,7 @@ export default function ComboHealthTab() {
           <div className="flex flex-col items-center justify-center gap-4 text-center">
             <span className="material-symbols-outlined text-[40px] text-error">sync_problem</span>
             <div className="flex flex-col gap-1">
-              <div className="font-medium text-text-main">Unable to load combo health</div>
+              <div className="font-medium text-text-main">{t("comboHealthUnableToLoad")}</div>
               <div className="text-sm text-text-muted">{error}</div>
             </div>
             <button
@@ -956,8 +964,8 @@ export default function ComboHealthTab() {
               Combo quota snapshots and routed requests will appear here after traffic starts
               flowing.
             </div>
-            <div className="rounded-lg border border-black/5 bg-black/2 p-4 dark:border-white/5 dark:bg-white/2">
-              <p className="text-xs font-medium text-text-main">Getting started</p>
+            <div className="rounded-lg border border-black/5 bg-black/[0.02] p-4 dark:border-white/5 dark:bg-white/[0.02]">
+              <p className="text-xs font-medium text-text-main">{t("comboHealthGettingStarted")}</p>
               <ul className="mt-2 text-left text-xs text-text-muted">
                 <li className="flex items-start gap-2">
                   <span className="material-symbols-outlined text-[14px] text-primary">

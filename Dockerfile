@@ -1,4 +1,4 @@
-FROM node:24-slim AS builder
+FROM node:26.2.0-trixie-slim AS builder
 WORKDIR /app
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -23,7 +23,7 @@ COPY . ./
 RUN --mount=type=cache,target=/app/.next/cache \
   mkdir -p /app/data && npm run build -- --webpack
 
-FROM node:24-slim AS runner-base
+FROM node:26.2.0-trixie-slim AS runner-base
 WORKDIR /app
 
 LABEL org.opencontainers.image.title="omniroute" \

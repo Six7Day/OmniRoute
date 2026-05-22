@@ -157,10 +157,10 @@ test("CodexExecutor.buildHeaders binds workspace ids and disables SSE accept for
   assert.equal(standardHeaders.Authorization, "Bearer codex-token");
   assert.equal(standardHeaders.Accept, "text/event-stream");
   assert.equal(standardHeaders["chatgpt-account-id"], "workspace-1");
-  assert.equal(standardHeaders.Version, "0.131.0");
+  assert.equal(standardHeaders.Version, "0.132.0");
   assert.equal(standardHeaders["Openai-Beta"], "responses=experimental");
   assert.equal(standardHeaders["X-Codex-Beta-Features"], "responses_websockets");
-  assert.equal(standardHeaders["User-Agent"], "codex-cli/0.131.0 (Windows 10.0.26200; x64)");
+  assert.equal(standardHeaders["User-Agent"], "codex-cli/0.132.0 (Windows 10.0.26200; x64)");
   assert.equal(compactHeaders.Accept, "application/json");
 });
 
@@ -169,13 +169,13 @@ test("CodexExecutor.buildHeaders honors safe env overrides for Version and User-
 
   await withEnv(
     {
-      CODEX_CLIENT_VERSION: "0.131.0",
+      CODEX_CLIENT_VERSION: "0.132.0",
       CODEX_USER_AGENT: undefined,
     },
     () => {
       const headers = executor.buildHeaders({ accessToken: "codex-token" }, true);
-      assert.equal(headers.Version, "0.131.0");
-      assert.equal(headers["User-Agent"], "codex-cli/0.131.0 (Windows 10.0.26200; x64)");
+      assert.equal(headers.Version, "0.132.0");
+      assert.equal(headers["User-Agent"], "codex-cli/0.132.0 (Windows 10.0.26200; x64)");
     }
   );
 
@@ -186,7 +186,7 @@ test("CodexExecutor.buildHeaders honors safe env overrides for Version and User-
     },
     () => {
       const headers = executor.buildHeaders({ accessToken: "codex-token" }, true);
-      assert.equal(headers.Version, "0.131.0");
+      assert.equal(headers.Version, "0.132.0");
       assert.equal(headers["User-Agent"], "custom-codex/9.9.9");
     }
   );
@@ -1275,7 +1275,7 @@ test("CodexExecutor.refreshCredentials refreshes OAuth tokens and returns null w
   }
 });
 
-test("CodexExecutor.refreshCredentials propagates unrecoverable error object instead of returning null", async () => {
+test("CodexExecutor.refreshCredentials returns null for unrecoverable refresh errors", async () => {
   const executor = new CodexExecutor();
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () =>
@@ -1286,8 +1286,7 @@ test("CodexExecutor.refreshCredentials propagates unrecoverable error object ins
 
   try {
     const result = await executor.refreshCredentials({ refreshToken: "dead-token" }, null);
-    assert.ok(result !== null, "should return error object, not null");
-    assert.equal((result as any).error, "unrecoverable_refresh_error");
+    assert.equal(result, null);
   } finally {
     globalThis.fetch = originalFetch;
   }

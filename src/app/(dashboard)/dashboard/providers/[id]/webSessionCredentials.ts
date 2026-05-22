@@ -52,10 +52,10 @@ export const WEB_SESSION_CREDENTIAL_REQUIREMENTS = {
     acceptsFullCookieHeader: true,
   },
   "deepseek-web": {
-    kind: "cookie",
-    credentialName: "ds_session_id",
-    placeholder: "ds_session_id=...",
-    acceptsFullCookieHeader: true,
+    kind: "token",
+    credentialName: "userToken",
+    placeholder: "userToken=... or paste raw userToken",
+    acceptsFullCookieHeader: false,
   },
   "copilot-web": {
     kind: "token",
@@ -68,6 +68,12 @@ export const WEB_SESSION_CREDENTIAL_REQUIREMENTS = {
     credentialName: "",
     placeholder: "",
     acceptsFullCookieHeader: false,
+  },
+  "t3-web": {
+    kind: "cookie",
+    credentialName: "convex-session-id + Cookie header",
+    placeholder: "convex-session-id=abc123...; Cookie: ...",
+    acceptsFullCookieHeader: true,
   },
 } satisfies Record<keyof typeof WEB_COOKIE_PROVIDERS, WebSessionCredentialRequirement>;
 

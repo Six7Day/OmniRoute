@@ -140,13 +140,19 @@ test("sidebar visibility excludes the removed auto-combo item", async () => {
     (section) => section.id === "omni-proxy"
   );
 
-  assert.equal(sidebarVisibility.HIDEABLE_SIDEBAR_ITEM_IDS.includes("auto-combo"), false);
-  assert.ok(omniProxySection);
   assert.equal(
-    sidebarVisibility.getSectionItems(omniProxySection).some((item) => item.id === "auto-combo"),
+    (sidebarVisibility.HIDEABLE_SIDEBAR_ITEM_IDS as readonly string[]).includes("auto-combo"),
     false
   );
-  assert.deepEqual(sidebarVisibility.normalizeHiddenSidebarItems(["auto-combo", "home"]), ["home"]);
+  assert.ok(omniProxySection);
+  const items = sidebarVisibility.getSectionItems(omniProxySection);
+  assert.equal(
+    items.some((item) => (item.id as string) === "auto-combo"),
+    false
+  );
+  assert.deepEqual(sidebarVisibility.normalizeHiddenSidebarItems(["auto-combo" as any, "home"]), [
+    "home",
+  ]);
 });
 
 test("intelligent routing helpers normalize config and build provider scores", () => {
