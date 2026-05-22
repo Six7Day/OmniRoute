@@ -683,15 +683,20 @@ export default function ProvidersPage() {
               {t("addFirstProviderDesc") ||
                 "Connect an AI provider to start routing requests through OmniRoute. You can use free providers, API keys, or OAuth accounts."}
             </p>
-            <a
-              href="https://docs.omniroute.io/providers"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg border border-border text-text-muted hover:text-text-main hover:bg-bg-subtle transition-colors mt-4"
-            >
-              <span className="material-symbols-outlined text-[16px]">help</span>
-              {t("learnMore") || "Learn more"}
-            </a>
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+              <Button icon="add" onClick={() => router.push("/dashboard/providers/new")}>
+                Provider Onboarding Wizard
+              </Button>
+              <a
+                href="https://docs.omniroute.io/providers"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg border border-border text-text-muted hover:text-text-main hover:bg-bg-subtle transition-colors"
+              >
+                <span className="material-symbols-outlined text-[16px]">help</span>
+                {t("learnMore") || "Learn more"}
+              </a>
+            </div>
           </div>
         </Card>
       )}
@@ -728,6 +733,9 @@ export default function ProvidersPage() {
               disabled={connections.length === 0}
               className="rounded-lg border border-border bg-bg-subtle px-3 py-1.5"
             />
+            <Button size="sm" icon="add" onClick={() => router.push("/dashboard/providers/new")}>
+              Onboarding Wizard
+            </Button>
             <button
               onClick={() => handleBatchTest("all")}
               disabled={!!testingMode}
