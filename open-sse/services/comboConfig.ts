@@ -36,6 +36,23 @@ const LEGACY_COMBO_RESILIENCE_KEYS = new Set([
   "healthCheckTimeoutMs",
 ]);
 
+type ComboConfigRecord = Record<string, unknown>;
+
+type ComboConfigLike =
+  | {
+      config?: ComboConfigRecord | null;
+    }
+  | null
+  | undefined;
+
+type ComboSettingsLike =
+  | {
+      comboDefaults?: ComboConfigRecord | null;
+      providerOverrides?: Record<string, ComboConfigRecord | null | undefined> | null;
+    }
+  | null
+  | undefined;
+
 /**
  * Resolve effective config for a combo, applying cascade:
  *   DEFAULT_COMBO_CONFIG → settings.comboDefaults → settings.providerOverrides[provider] → combo.config
@@ -45,13 +62,17 @@ const LEGACY_COMBO_RESILIENCE_KEYS = new Set([
  * @param {string} [provider] - Optional provider to apply provider-level overrides
  * @returns {Object} Resolved config
  */
-export function resolveComboConfig(combo, settings, provider?: string | null) {
+export function resolveComboConfig(
+  combo: ComboConfigLike,
+  settings: ComboSettingsLike,
+  provider?: string | null
+) {
   const global = settings?.comboDefaults || {};
   const providerOverride = provider ? settings?.providerOverrides?.[provider] || {} : {};
   const comboConfig = combo?.config || {};
 
   // Clean undefined values before spreading
-  const clean = (obj) =>
+  const clean = (obj: ComboConfigRecord) =>
     Object.fromEntries(
       Object.entries(obj).filter(
         ([key, value]) =>

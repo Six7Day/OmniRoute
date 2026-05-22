@@ -139,7 +139,7 @@ export async function handleEmbedding({
   }
 
   // Build headers
-  const headers = {
+  const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
 

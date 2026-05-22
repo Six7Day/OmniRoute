@@ -24,7 +24,11 @@ import { getCircuitBreaker } from "../../src/shared/utils/circuitBreaker";
 import { fisherYatesShuffle, getNextFromDeck } from "../../src/shared/utils/shuffleDeck";
 import { parseModel } from "./model.ts";
 import { applyComboAgentMiddleware, injectModelTag } from "./comboAgentMiddleware.ts";
-import { classifyWithConfig, DEFAULT_INTENT_CONFIG } from "./intentClassifier.ts";
+import {
+  classifyWithConfig,
+  DEFAULT_INTENT_CONFIG,
+  type IntentClassifierConfig,
+} from "./intentClassifier.ts";
 import { selectProvider as selectAutoProvider } from "./autoCombo/engine.ts";
 import { selectWithStrategy } from "./autoCombo/routerStrategy.ts";
 import { getTaskFitness } from "./autoCombo/taskFitness.ts";
@@ -87,7 +91,7 @@ function comboModelNotFoundResponse(message: string) {
 }
 
 // Bootstrap defaults from ClawRouter benchmark (used when no local latency history exists yet)
-const DEFAULT_MODEL_P95_MS = {
+const DEFAULT_MODEL_P95_MS: Record<string, number> = {
   "grok-4-fast-non-reasoning": 1143,
   "grok-4-1-fast-non-reasoning": 1244,
   "gemini-2.5-flash": 1238,
@@ -131,6 +135,77 @@ type ComboErrorBody = {
   retryAfter?: ComboRetryAfter | null;
 } | null;
 
+type ComboLike = {
+  id?: string;
+  name: string;
+  strategy?: string | null;
+  models: unknown[];
+  config?: Record<string, unknown> | null;
+  autoConfig?: Record<string, unknown> | null;
+  context_cache_protection?: boolean | number;
+  system_message?: string | null;
+  [key: string]: unknown;
+};
+
+type ComboInput = ComboLike | Record<string, unknown>;
+
+type ComboCollectionLike = ComboInput[] | { combos?: ComboInput[] } | null | undefined;
+
+type ComboLogger = {
+  info: (...args: unknown[]) => void;
+  warn: (...args: unknown[]) => void;
+  error?: (...args: unknown[]) => void;
+  debug: (...args: unknown[]) => void;
+};
+
+type HandleSingleModel = (
+  body: Record<string, unknown>,
+  modelStr: string,
+  target?: ResolvedComboTarget
+) => Promise<Response>;
+
+type IsModelAvailable = (
+  modelStr: string,
+  target?: ResolvedComboTarget
+) => Promise<boolean> | boolean;
+
+type ComboRelayOptions = {
+  sessionId?: string | null;
+  config?: Record<string, unknown> | null;
+  [key: string]: unknown;
+};
+
+type HandleComboChatOptions = {
+  body: Record<string, unknown>;
+  combo: ComboLike;
+  handleSingleModel: HandleSingleModel;
+  isModelAvailable?: IsModelAvailable;
+  log: ComboLogger;
+  settings?: Record<string, unknown> | null;
+  allCombos?: ComboCollectionLike;
+  relayOptions?: ComboRelayOptions | null;
+  signal?: AbortSignal | null;
+  apiKeyAllowedConnections?: string[] | null;
+};
+
+type HandleRoundRobinOptions = Omit<
+  HandleComboChatOptions,
+  "relayOptions" | "apiKeyAllowedConnections"
+>;
+
+type HistoricalLatencyStatsEntry = {
+  totalRequests?: number;
+  p95LatencyMs?: number;
+  latencyStdDev?: number;
+  successRate?: number;
+};
+
+type AutoProviderCandidate = ProviderCandidate & {
+  stepId: string;
+  executionKey: string;
+  modelStr: string;
+};
+
 function toRetryAfterDisplayValue(value: ComboRetryAfter): string | Date {
   if (typeof value !== "number") return value;
   if (value > 0 && value < 1_000_000_000) {
@@ -150,6 +225,7 @@ export type ResolvedComboTarget = {
   allowedConnectionIds?: string[] | null;
   weight: number;
   label: string | null;
+  failoverBeforeRetry?: unknown;
 };
 
 type ComboRuntimeStep =
@@ -163,12 +239,34 @@ type ComboRuntimeStep =
       label: string | null;
     };
 
-function isRecord(value): value is Record<string, unknown> {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
-function toTrimmedString(value): string | null {
+function toTrimmedString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function toComboLike(combo: ComboInput): ComboLike {
+  return {
+    ...combo,
+    id: toTrimmedString(combo.id) || undefined,
+    name: toTrimmedString(combo.name) || "",
+    models: Array.isArray(combo.models) ? combo.models : [],
+    config: isRecord(combo.config) ? combo.config : null,
+    autoConfig: isRecord(combo.autoConfig) ? combo.autoConfig : null,
+    context_cache_protection:
+      typeof combo.context_cache_protection === "boolean" ||
+      typeof combo.context_cache_protection === "number"
+        ? combo.context_cache_protection
+        : undefined,
+    system_message: typeof combo.system_message === "string" ? combo.system_message : null,
+  };
+}
+
+function getCombosArray(allCombos: ComboCollectionLike): ComboLike[] {
+  const combos = Array.isArray(allCombos) ? allCombos : allCombos?.combos || [];
+  return combos.map((combo) => toComboLike(combo));
 }
 
 /**
@@ -268,7 +366,7 @@ export async function validateResponseQuality(
 
 // In-memory atomic counter per combo for round-robin distribution
 // Resets on server restart (by design — no stale state)
-const rrCounters = new Map();
+const rrCounters = new Map<string, number>();
 
 const resetAwareConnectionCache = new Map<
   string,
@@ -283,7 +381,7 @@ const resetAwareQuotaCache = new Map<
  * Normalize a model entry to { model, weight }
  * Supports both legacy string format and new object format
  */
-function normalizeModelEntry(entry) {
+function normalizeModelEntry(entry: unknown): { model: string; weight: number } {
   return {
     model: getComboStepTarget(entry) || "",
     weight: getComboStepWeight(entry),
@@ -318,7 +416,13 @@ function buildExecutionKey(path: string[], stepId: string): string {
   return [...path, stepId].join(">");
 }
 
-function normalizeRuntimeStep(entry, comboName, index, allCombos, path: string[] = []) {
+function normalizeRuntimeStep(
+  entry: unknown,
+  comboName: string,
+  index: number,
+  allCombos: ComboCollectionLike,
+  path: string[] = []
+): ComboRuntimeStep | null {
   const step = normalizeComboStep(entry, {
     comboName,
     index,
@@ -357,19 +461,23 @@ function normalizeRuntimeStep(entry, comboName, index, allCombos, path: string[]
   } satisfies ResolvedComboTarget;
 }
 
-function getDirectComboTargets(combo) {
+function getDirectComboTargets(combo: ComboLike): ResolvedComboTarget[] {
   return getOrderedTopLevelRuntimeSteps(combo, null).filter(
     (entry): entry is ResolvedComboTarget => entry?.kind === "model"
   );
 }
 
-function getTopLevelRuntimeSteps(combo, allCombos, path: string[] = []) {
+function getTopLevelRuntimeSteps(
+  combo: ComboLike,
+  allCombos: ComboCollectionLike,
+  path: string[] = []
+): ComboRuntimeStep[] {
   return (combo.models || [])
     .map((entry, index) => normalizeRuntimeStep(entry, combo.name, index, allCombos, path))
     .filter((entry): entry is ComboRuntimeStep => entry !== null);
 }
 
-function getCompositeTierStepOrder(combo): string[] {
+function getCompositeTierStepOrder(combo: ComboLike): string[] {
   const compositeTiers = isRecord(combo?.config) ? combo.config.compositeTiers : null;
   if (!isRecord(compositeTiers)) return [];
 
@@ -419,11 +527,14 @@ function getCompositeTierStepOrder(combo): string[] {
   return orderedStepIds;
 }
 
-function hasCompositeTierRuntimeOrder(combo): boolean {
+function hasCompositeTierRuntimeOrder(combo: ComboLike): boolean {
   return getCompositeTierStepOrder(combo).length > 0;
 }
 
-function orderRuntimeStepsByCompositeTiers(steps: ComboRuntimeStep[], combo): ComboRuntimeStep[] {
+function orderRuntimeStepsByCompositeTiers(
+  steps: ComboRuntimeStep[],
+  combo: ComboLike
+): ComboRuntimeStep[] {
   const orderedStepIds = getCompositeTierStepOrder(combo);
   if (orderedStepIds.length === 0) return steps;
 
@@ -447,15 +558,25 @@ function orderRuntimeStepsByCompositeTiers(steps: ComboRuntimeStep[], combo): Co
   return ordered;
 }
 
-function getOrderedTopLevelRuntimeSteps(combo, allCombos, path: string[] = []) {
+function getOrderedTopLevelRuntimeSteps(
+  combo: ComboLike,
+  allCombos: ComboCollectionLike,
+  path: string[] = []
+): ComboRuntimeStep[] {
   return orderRuntimeStepsByCompositeTiers(getTopLevelRuntimeSteps(combo, allCombos, path), combo);
 }
 
-function expandRuntimeStep(step, allCombos, visited = new Set(), depth = 0, path: string[] = []) {
+function expandRuntimeStep(
+  step: ComboRuntimeStep,
+  allCombos: ComboCollectionLike,
+  visited = new Set<string>(),
+  depth = 0,
+  path: string[] = []
+): ResolvedComboTarget[] {
   if (step.kind === "model") return [step];
   if (depth > MAX_COMBO_DEPTH) return [];
 
-  const combos = Array.isArray(allCombos) ? allCombos : allCombos?.combos || [];
+  const combos = getCombosArray(allCombos);
   const nestedCombo = combos.find((combo) => combo.name === step.comboName);
   if (!nestedCombo || visited.has(step.comboName)) return [];
 
@@ -466,12 +587,12 @@ function expandRuntimeStep(step, allCombos, visited = new Set(), depth = 0, path
 }
 
 export function resolveNestedComboTargets(
-  combo,
-  allCombos,
-  visited = new Set(),
+  combo: ComboLike,
+  allCombos: ComboCollectionLike,
+  visited = new Set<string>(),
   depth = 0,
   path: string[] = []
-) {
+): ResolvedComboTarget[] {
   const directTargets = (combo.models || [])
     .map((entry, index) => normalizeRuntimeStep(entry, combo.name, index, null, path))
     .filter((entry): entry is ResolvedComboTarget => entry?.kind === "model");
@@ -500,8 +621,11 @@ export function resolveNestedComboTargets(
  * @param {Array|Object} combosData - Array of combos or object with combos
  * @returns {Object|null} Full combo object or null if not a combo
  */
-export function getComboFromData(modelStr, combosData) {
-  const combos = Array.isArray(combosData) ? combosData : combosData?.combos || [];
+export function getComboFromData(
+  modelStr: string,
+  combosData: ComboCollectionLike
+): ComboLike | null {
+  const combos = getCombosArray(combosData);
   const combo = combos.find((c) => c.name === modelStr);
   if (combo?.models && combo.models.length > 0) {
     return combo;
@@ -512,7 +636,10 @@ export function getComboFromData(modelStr, combosData) {
 /**
  * Legacy: Get combo models as string array (backward compat)
  */
-export function getComboModelsFromData(modelStr, combosData) {
+export function getComboModelsFromData(
+  modelStr: string,
+  combosData: ComboCollectionLike
+): string[] | null {
   const combo = getComboFromData(modelStr, combosData);
   if (!combo) return null;
   return combo.models.map((m) => normalizeModelEntry(m).model);
@@ -526,7 +653,12 @@ export function getComboModelsFromData(modelStr, combosData) {
  * @param {number} [depth] - Current depth level
  * @throws {Error} If circular reference or max depth exceeded
  */
-export function validateComboDAG(comboName, allCombos, visited = new Set(), depth = 0) {
+export function validateComboDAG(
+  comboName: string,
+  allCombos: ComboCollectionLike,
+  visited = new Set<string>(),
+  depth = 0
+): void {
   if (depth > MAX_COMBO_DEPTH) {
     throw new Error(`Max combo nesting depth (${MAX_COMBO_DEPTH}) exceeded at "${comboName}"`);
   }
@@ -535,7 +667,7 @@ export function validateComboDAG(comboName, allCombos, visited = new Set(), dept
   }
   visited.add(comboName);
 
-  const combos = Array.isArray(allCombos) ? allCombos : allCombos?.combos || [];
+  const combos = getCombosArray(allCombos);
   const combo = combos.find((c) => c.name === comboName);
   if (!combo?.models) return;
 
@@ -558,12 +690,17 @@ export function validateComboDAG(comboName, allCombos, visited = new Set(), dept
  * @param {number} [depth] - Current depth
  * @returns {Array} Flat array of model strings
  */
-export function resolveNestedComboModels(combo, allCombos, visited = new Set(), depth = 0) {
+export function resolveNestedComboModels(
+  combo: ComboLike,
+  allCombos: ComboCollectionLike,
+  visited = new Set<string>(),
+  depth = 0
+): string[] {
   if (depth > MAX_COMBO_DEPTH) return combo.models.map((m) => normalizeModelEntry(m).model);
   if (visited.has(combo.name)) return []; // cycle safety
   visited.add(combo.name);
 
-  const combos = Array.isArray(allCombos) ? allCombos : allCombos?.combos || [];
+  const combos = getCombosArray(allCombos);
   const resolved: string[] = [];
 
   for (const entry of combo.models || []) {
@@ -620,7 +757,7 @@ function orderTargetsForWeightedFallback<T extends { executionKey: string; weigh
  * @param {Array<string>} models - Model strings in "provider/model" format
  * @returns {Promise<Array<string>>} Sorted model strings
  */
-async function sortModelsByCost(models) {
+async function sortModelsByCost(models: string[]): Promise<string[]> {
   try {
     const { getPricingForModel } = await import("../../src/lib/localDb");
     const withCost = await Promise.all(
@@ -630,7 +767,8 @@ async function sortModelsByCost(models) {
         const model = parsed.model || modelStr;
         try {
           const pricing = await getPricingForModel(provider, model);
-          return { modelStr, cost: pricing?.input ?? Infinity };
+          const cost = Number(pricing?.input);
+          return { modelStr, cost: Number.isFinite(cost) ? cost : Infinity };
         } catch {
           return { modelStr, cost: Infinity };
         }
@@ -666,7 +804,7 @@ async function sortTargetsByCost(targets: ResolvedComboTarget[]) {
  * @param {string} comboName - Combo name for metrics lookup
  * @returns {Array<string>} Sorted model strings
  */
-function sortModelsByUsage(models, comboName) {
+function sortModelsByUsage(models: string[], comboName: string): string[] {
   const metrics = getComboMetrics(comboName);
   if (!metrics?.byModel) return models;
 
@@ -703,7 +841,7 @@ function sortTargetsByUsage(targets: ResolvedComboTarget[], comboName: string) {
  * @param {Array<string>} models - Model strings in "provider/model" format
  * @returns {Array<string>} Sorted model strings (largest context first)
  */
-function sortModelsByContextSize(models) {
+function sortModelsByContextSize(models: string[]): string[] {
   const withContext = models.map((modelStr) => {
     return { modelStr, context: getModelContextLimitForModelString(modelStr) ?? 0 };
   });
@@ -1467,31 +1605,31 @@ async function orderTargetsByResetWindow(
   ].map((entry) => entry.target);
 }
 
-function toTextContent(content) {
+function toTextContent(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   return content
     .map((part) => {
-      if (!part || typeof part !== "object") return "";
+      if (!isRecord(part)) return "";
       if (typeof part.text === "string") return part.text;
       return "";
     })
     .join("\n");
 }
 
-function extractPromptForIntent(body) {
+function extractPromptForIntent(body: Record<string, unknown> | null | undefined): string {
   if (!body || typeof body !== "object") return "";
 
   const fromMessages = Array.isArray(body.messages)
-    ? [...body.messages].reverse().find((m) => m && typeof m === "object" && m.role === "user")
+    ? [...body.messages].reverse().find((m) => isRecord(m) && m.role === "user")
     : null;
-  if (fromMessages) return toTextContent(fromMessages.content);
+  if (isRecord(fromMessages)) return toTextContent(fromMessages.content);
 
   if (typeof body.input === "string") return body.input;
   if (Array.isArray(body.input)) {
     const text = body.input
       .map((item) => {
-        if (!item || typeof item !== "object") return "";
+        if (!isRecord(item)) return "";
         if (typeof item.content === "string") return item.content;
         if (typeof item.text === "string") return item.text;
         return "";
@@ -1505,7 +1643,7 @@ function extractPromptForIntent(body) {
   return "";
 }
 
-function mapIntentToTaskType(intent) {
+function mapIntentToTaskType(intent: string): "coding" | "analysis" | "default" {
   switch (intent) {
     case "code":
       return "coding";
@@ -1530,7 +1668,7 @@ function calculateTargetContextAffinity(
   return 0.1;
 }
 
-function toStringArray(input) {
+function toStringArray(input: unknown): string[] {
   if (Array.isArray(input)) {
     return input.map((v) => (typeof v === "string" ? v.trim() : "")).filter(Boolean);
   }
@@ -1543,49 +1681,55 @@ function toStringArray(input) {
   return [];
 }
 
-function getIntentConfig(settings, combo) {
+function getIntentConfig(
+  settings: Record<string, unknown> | null | undefined,
+  combo: ComboLike
+): IntentClassifierConfig {
+  const resolvedSettings = settings || {};
+  const comboAutoConfig = combo?.autoConfig || {};
+  const comboConfigAuto = isRecord(combo?.config?.auto) ? combo.config.auto : {};
   const comboIntentConfig =
-    combo?.autoConfig?.intentConfig ||
-    combo?.config?.auto?.intentConfig ||
-    combo?.config?.intentConfig ||
+    (isRecord(comboAutoConfig.intentConfig) && comboAutoConfig.intentConfig) ||
+    (isRecord(comboConfigAuto.intentConfig) && comboConfigAuto.intentConfig) ||
+    (isRecord(combo?.config?.intentConfig) && combo.config.intentConfig) ||
     {};
 
   return {
     ...DEFAULT_INTENT_CONFIG,
     ...comboIntentConfig,
-    ...(typeof settings?.intentDetectionEnabled === "boolean"
-      ? { enabled: settings.intentDetectionEnabled }
+    ...(typeof resolvedSettings.intentDetectionEnabled === "boolean"
+      ? { enabled: resolvedSettings.intentDetectionEnabled }
       : {}),
-    ...(Number.isFinite(Number(settings?.intentSimpleMaxWords))
-      ? { simpleMaxWords: Number(settings.intentSimpleMaxWords) }
+    ...(Number.isFinite(Number(resolvedSettings.intentSimpleMaxWords))
+      ? { simpleMaxWords: Number(resolvedSettings.intentSimpleMaxWords) }
       : {}),
-    ...(toStringArray(settings?.intentExtraCodeKeywords).length > 0
-      ? { extraCodeKeywords: toStringArray(settings.intentExtraCodeKeywords) }
+    ...(toStringArray(resolvedSettings.intentExtraCodeKeywords).length > 0
+      ? { extraCodeKeywords: toStringArray(resolvedSettings.intentExtraCodeKeywords) }
       : {}),
-    ...(toStringArray(settings?.intentExtraReasoningKeywords).length > 0
-      ? { extraReasoningKeywords: toStringArray(settings.intentExtraReasoningKeywords) }
+    ...(toStringArray(resolvedSettings.intentExtraReasoningKeywords).length > 0
+      ? { extraReasoningKeywords: toStringArray(resolvedSettings.intentExtraReasoningKeywords) }
       : {}),
-    ...(toStringArray(settings?.intentExtraSimpleKeywords).length > 0
-      ? { extraSimpleKeywords: toStringArray(settings.intentExtraSimpleKeywords) }
+    ...(toStringArray(resolvedSettings.intentExtraSimpleKeywords).length > 0
+      ? { extraSimpleKeywords: toStringArray(resolvedSettings.intentExtraSimpleKeywords) }
       : {}),
   };
 }
 
-function getBootstrapLatencyMs(modelId) {
+function getBootstrapLatencyMs(modelId: string): number {
   const normalized = String(modelId || "").toLowerCase();
   return DEFAULT_MODEL_P95_MS[normalized] ?? 1500;
 }
 
 async function buildAutoCandidates(
-  targets,
-  comboName,
+  targets: ResolvedComboTarget[],
+  comboName: string,
   sessionId: string | null | undefined = null,
   resetWindowConfig: ResetWindowConfig = resolveResetWindowConfig(null)
-) {
+): Promise<AutoProviderCandidate[]> {
   const metrics = getComboMetrics(comboName);
   const { getPricingForModel } = await import("../../src/lib/localDb");
   const quotaPromises = new Map<string, Promise<unknown>>();
-  let historicalLatencyStats = {};
+  let historicalLatencyStats: Record<string, HistoricalLatencyStatsEntry> = {};
   try {
     const { getModelLatencyStats } = await import("../../src/lib/usageDb");
     historicalLatencyStats = await getModelLatencyStats({
@@ -1656,7 +1800,7 @@ async function buildAutoCandidates(
           : Math.max(10, p95LatencyMs * 0.1);
 
       const breakerStateRaw = getCircuitBreaker(provider)?.getStatus?.()?.state;
-      const circuitBreakerState =
+      const circuitBreakerState: ProviderCandidate["circuitBreakerState"] =
         breakerStateRaw === "OPEN" || breakerStateRaw === "HALF_OPEN" ? breakerStateRaw : "CLOSED";
       const contextAffinity = calculateTargetContextAffinity(target, sessionId);
       let resetWindowAffinity = 0.5;
@@ -1693,7 +1837,7 @@ async function buildAutoCandidates(
         p95LatencyMs,
         latencyStdDev,
         errorRate,
-        accountTier: "standard",
+        accountTier: "standard" as const,
         quotaResetIntervalSecs: 86400,
         contextAffinity,
         resetWindowAffinity,
@@ -1805,11 +1949,20 @@ async function applyRequestTagRouting(
   return filteredTargets;
 }
 
-export function resolveComboTargets(combo, allCombos) {
+export function resolveComboTargets(
+  combo: ComboLike,
+  allCombos: ComboCollectionLike
+): ResolvedComboTarget[] {
   return allCombos ? resolveNestedComboTargets(combo, allCombos) : getDirectComboTargets(combo);
 }
 
-function resolveWeightedTargets(combo, allCombos) {
+function resolveWeightedTargets(
+  combo: ComboLike,
+  allCombos: ComboCollectionLike
+): {
+  orderedTargets: ResolvedComboTarget[];
+  selectedStep: ComboRuntimeStep | null;
+} {
   const topLevelSteps = getOrderedTopLevelRuntimeSteps(combo, allCombos);
   if (topLevelSteps.length === 0) {
     return { orderedTargets: [], selectedStep: null };
@@ -1840,7 +1993,7 @@ function resolveWeightedTargets(combo, allCombos) {
 
 function scoreAutoTargets(
   targets: ResolvedComboTarget[],
-  candidates: ProviderCandidate[],
+  candidates: AutoProviderCandidate[],
   taskType: string | null,
   weights: ScoringWeights
 ) {
@@ -1891,7 +2044,7 @@ export async function handleComboChat({
   relayOptions,
   signal,
   apiKeyAllowedConnections = null,
-}) {
+}: HandleComboChatOptions): Promise<Response> {
   const strategy = normalizeRoutingStrategy(combo.strategy || "priority");
   const relayConfig =
     strategy === "context-relay" ? resolveContextRelayConfig(relayOptions?.config || null) : null;
@@ -1911,7 +2064,7 @@ export async function handleComboChat({
   const clientRequestedStream = body?.stream === true;
   // Wrap handleSingleModel to inject context caching tag on response (#401)
   const handleSingleModelWrapped = combo.context_cache_protection
-    ? async (b, modelStr, target) => {
+    ? async (b: Record<string, unknown>, modelStr: string, target?: ResolvedComboTarget) => {
         const res = await handleSingleModel(b, modelStr, target);
         if (!res.ok) return res;
 
@@ -2170,7 +2323,14 @@ export async function handleComboChat({
     recordComboIntent(combo.name, intent);
     const taskType = mapIntentToTaskType(intent);
 
-    const autoConfigSource = combo?.autoConfig || combo?.config?.auto || combo?.config || {};
+    const rawAutoConfigSource =
+      combo?.autoConfig ||
+      (isRecord(combo?.config?.auto) ? combo.config.auto : null) ||
+      combo?.config ||
+      {};
+    const autoConfigSource: Record<string, unknown> = isRecord(rawAutoConfigSource)
+      ? rawAutoConfigSource
+      : {};
     const routingStrategy =
       typeof autoConfigSource.routerStrategy === "string"
         ? autoConfigSource.routerStrategy
@@ -2186,7 +2346,7 @@ export async function handleComboChat({
 
     const weights =
       autoConfigSource.weights && typeof autoConfigSource.weights === "object"
-        ? autoConfigSource.weights
+        ? (autoConfigSource.weights as ScoringWeights)
         : DEFAULT_WEIGHTS;
     const explorationRate = Number.isFinite(Number(autoConfigSource.explorationRate))
       ? Number(autoConfigSource.explorationRate)
@@ -2338,7 +2498,9 @@ export async function handleComboChat({
     const selectedTarget =
       orderedTargets.find((target) => target.executionKey === selectedExecutionKey) || null;
     const rest = orderedTargets.filter((target) => target.executionKey !== selectedExecutionKey);
-    orderedTargets = [selectedTarget, ...rest].filter(Boolean);
+    orderedTargets = [selectedTarget, ...rest].filter(
+      (target): target is ResolvedComboTarget => target !== null
+    );
     log.info(
       "COMBO",
       `Strict-random deck: ${selectedExecutionKey} selected (${orderedTargets.length} targets)`
@@ -2364,9 +2526,15 @@ export async function handleComboChat({
         const manifestHint = generateRoutingHints(
           orderedTargets.filter((t) => t.kind === "model"),
           {
-            messages: Array.isArray(body?.messages) ? body.messages : [],
-            tools: body?.tools,
-            model: body?.model,
+            messages: Array.isArray(body?.messages)
+              ? (body.messages as Array<{ role?: string; content?: string | unknown }>)
+              : [],
+            tools: Array.isArray(body?.tools)
+              ? (body.tools as Array<{
+                  function?: { name: string; description?: string; parameters?: unknown };
+                }>)
+              : undefined,
+            model: typeof body?.model === "string" ? body.model : undefined,
           }
         );
         if (manifestHint.strategyModifier === "require-premium") {
@@ -2818,6 +2986,8 @@ export async function handleComboChat({
       headers: { "Content-Type": "application/json" },
     });
   }
+
+  return errorResponse(503, "Combo routing completed without an upstream response");
 }
 
 /**
@@ -2840,7 +3010,7 @@ async function handleRoundRobinCombo({
   settings,
   allCombos,
   signal,
-}) {
+}: HandleRoundRobinOptions): Promise<Response> {
   const config = settings
     ? resolveComboConfig(combo, settings)
     : { ...getDefaultComboConfig(), ...(combo.config || {}) };
@@ -2907,17 +3077,18 @@ async function handleRoundRobinCombo({
     }
 
     // Acquire semaphore slot (may wait in queue)
-    let release;
+    let release: () => void;
     try {
       release = await semaphore.acquire(semaphoreKey, {
         maxConcurrency: concurrency,
         timeoutMs: queueTimeout,
       });
     } catch (err) {
-      if (err.code === "SEMAPHORE_TIMEOUT" || err.code === "SEMAPHORE_QUEUE_FULL") {
+      const errCode = isRecord(err) && typeof err.code === "string" ? err.code : null;
+      if (errCode === "SEMAPHORE_TIMEOUT" || errCode === "SEMAPHORE_QUEUE_FULL") {
         log.warn(
           "COMBO-RR",
-          `Semaphore ${err.code === "SEMAPHORE_QUEUE_FULL" ? "queue full" : "timeout"} for ${modelStr}, trying next model`
+          `Semaphore ${errCode === "SEMAPHORE_QUEUE_FULL" ? "queue full" : "timeout"} for ${modelStr}, trying next model`
         );
         if (offset > 0) fallbackCount++;
         continue;

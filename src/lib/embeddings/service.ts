@@ -50,7 +50,7 @@ export async function createEmbeddingResponse(
 
         return handleComboChat({
           body,
-          combo,
+          combo: combo as any,
           handleSingleModel: async (reqBody: any, targetModelStr: string, target?: any) => {
             const newBody = { ...reqBody, model: targetModelStr };
             return createEmbeddingResponse(newBody, {
@@ -61,7 +61,7 @@ export async function createEmbeddingResponse(
           isModelAvailable: undefined,
           log,
           settings,
-          allCombos,
+          allCombos: allCombos as any,
           relayOptions: undefined,
           signal: undefined,
         });
