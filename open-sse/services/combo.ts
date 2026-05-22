@@ -16,7 +16,12 @@ import {
 } from "./accountFallback.ts";
 import { RateLimitReason } from "../config/constants.ts";
 import { errorResponse, unavailableResponse } from "../utils/error.ts";
-import { recordComboIntent, recordComboRequest, getComboMetrics } from "./comboMetrics.ts";
+import {
+  recordComboIntent,
+  recordComboRequest,
+  recordComboShadowRequest,
+  getComboMetrics,
+} from "./comboMetrics.ts";
 import { resolveComboConfig, getDefaultComboConfig } from "./comboConfig.ts";
 import { maybeGenerateHandoff, resolveContextRelayConfig } from "./contextHandoff.ts";
 import { fetchCodexQuota } from "./codexQuotaFetcher.ts";
@@ -228,6 +233,15 @@ export type ResolvedComboTarget = {
   weight: number;
   label: string | null;
   failoverBeforeRetry?: unknown;
+  trafficType?: "production" | "shadow";
+};
+
+type ShadowRoutingConfig = {
+  enabled: boolean;
+  targets: unknown[];
+  sampleRate: number;
+  maxTargets: number;
+  timeoutMs: number;
 };
 
 type ComboRuntimeStep =
@@ -412,6 +426,145 @@ function toRecordedTarget(target: ResolvedComboTarget) {
     connectionId: target.connectionId,
     label: target.label,
   };
+}
+
+function normalizeShadowRoutingConfig(config: Record<string, unknown>): ShadowRoutingConfig {
+  const raw = isRecord(config.shadowRouting) ? config.shadowRouting : {};
+  const sampleRate = Number(raw.sampleRate ?? 1);
+  const maxTargets = Number(raw.maxTargets ?? 2);
+  const timeoutMs = Number(raw.timeoutMs ?? 30000);
+  return {
+    enabled: raw.enabled === true,
+    targets: Array.isArray(raw.targets) ? raw.targets : [],
+    sampleRate: Number.isFinite(sampleRate) ? Math.max(0, Math.min(1, sampleRate)) : 1,
+    maxTargets: Number.isFinite(maxTargets) ? Math.max(1, Math.min(10, Math.floor(maxTargets))) : 2,
+    timeoutMs: Number.isFinite(timeoutMs)
+      ? Math.max(1000, Math.min(120000, Math.floor(timeoutMs)))
+      : 30000,
+  };
+}
+
+function resolveShadowTargets(
+  combo: ComboLike,
+  config: Record<string, unknown>,
+  allCombos: ComboCollectionLike
+): ResolvedComboTarget[] {
+  const shadowConfig = normalizeShadowRoutingConfig(config);
+  if (!shadowConfig.enabled || shadowConfig.targets.length === 0) return [];
+  if (shadowConfig.sampleRate <= 0 || Math.random() > shadowConfig.sampleRate) return [];
+
+  const shadowCombo: ComboLike = {
+    ...combo,
+    name: `${combo.name}:shadow`,
+    models: shadowConfig.targets,
+  };
+  return resolveNestedComboTargets(shadowCombo, allCombos, new Set([combo.name]), 0, ["shadow"])
+    .slice(0, shadowConfig.maxTargets)
+    .map((target) => ({
+      ...target,
+      executionKey: `shadow>${target.executionKey}`,
+      trafficType: "shadow" as const,
+    }));
+}
+
+async function drainShadowResponse(response: Response): Promise<void> {
+  try {
+    if (!response.body) return;
+    await response.arrayBuffer();
+  } catch {
+    // Shadow draining is best-effort and must never affect the production response.
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("Shadow route timed out")), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
+
+function scheduleShadowRouting(
+  combo: ComboLike,
+  config: Record<string, unknown>,
+  body: Record<string, unknown>,
+  targets: ResolvedComboTarget[],
+  handleSingleModel: HandleSingleModel,
+  isModelAvailable: IsModelAvailable | undefined,
+  strategy: string,
+  log: ComboLogger
+): void {
+  if (targets.length === 0) return;
+  const shadowConfig = normalizeShadowRoutingConfig(config);
+  const run = async () => {
+    await Promise.all(
+      targets.map(async (target) => {
+        const startedAt = Date.now();
+        const shadowBody = {
+          ...body,
+          model: target.modelStr,
+          stream: false,
+          _omnirouteShadowRouting: true,
+        };
+        try {
+          if (isModelAvailable) {
+            const available = await isModelAvailable(target.modelStr, target);
+            if (!available) {
+              recordComboShadowRequest(combo.name, target.modelStr, {
+                success: false,
+                latencyMs: Date.now() - startedAt,
+                target: toRecordedTarget(target),
+              });
+              log.info("COMBO", `Shadow target skipped (unavailable): ${target.modelStr}`);
+              return;
+            }
+          }
+
+          const response = await withTimeout(
+            handleSingleModel(shadowBody, target.modelStr, {
+              ...target,
+              failoverBeforeRetry: true,
+              trafficType: "shadow",
+            }),
+            shadowConfig.timeoutMs
+          );
+          await drainShadowResponse(response.clone());
+          recordComboShadowRequest(combo.name, target.modelStr, {
+            success: response.ok,
+            latencyMs: Date.now() - startedAt,
+            target: toRecordedTarget(target),
+          });
+          log.info(
+            "COMBO",
+            `Shadow target ${target.modelStr} completed with status ${response.status} (${strategy})`
+          );
+        } catch (error) {
+          recordComboShadowRequest(combo.name, target.modelStr, {
+            success: false,
+            latencyMs: Date.now() - startedAt,
+            target: toRecordedTarget(target),
+          });
+          log.warn("COMBO", `Shadow target ${target.modelStr} failed`, {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      })
+    );
+  };
+
+  if (typeof setImmediate === "function") {
+    setImmediate(() => void run());
+    return;
+  }
+  setTimeout(() => void run(), 0);
 }
 
 function buildExecutionKey(path: string[], stepId: string): string {
@@ -2601,6 +2754,17 @@ export async function handleComboChat({
     return comboModelNotFoundResponse("Combo has no executable targets");
   }
 
+  scheduleShadowRouting(
+    combo,
+    config,
+    body,
+    resolveShadowTargets(combo, config, allCombos),
+    handleSingleModelWrapped,
+    isModelAvailable,
+    strategy,
+    log
+  );
+
   let globalAttempts = 0;
 
   for (let setTry = 0; setTry <= maxSetRetries; setTry++) {
@@ -3040,6 +3204,17 @@ async function handleRoundRobinCombo({
   if (modelCount === 0) {
     return comboModelNotFoundResponse("Round-robin combo has no executable targets");
   }
+
+  scheduleShadowRouting(
+    combo,
+    config,
+    body,
+    resolveShadowTargets(combo, config, allCombos),
+    handleSingleModel,
+    isModelAvailable,
+    "round-robin",
+    log
+  );
 
   // Get and increment atomic counter
   const counter = rrCounters.get(combo.name) || 0;

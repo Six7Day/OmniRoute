@@ -52,6 +52,10 @@ function errorResponse(status: number, message: string = `Error ${status}`) {
   });
 }
 
+function waitForBackgroundWork() {
+  return new Promise((resolve) => setTimeout(resolve, 25));
+}
+
 function providerBreakerOpenResponse() {
   return new Response(
     JSON.stringify({
@@ -262,6 +266,102 @@ test("handleComboChat priority strategy defaults to first model and records succ
   assert.equal(metrics.byTarget[firstStep.id].requests, 1);
   assert.equal(metrics.byTarget[firstStep.id].model, "openai/gpt-4o-mini");
   assert.equal(metrics.strategy, "priority");
+});
+
+test("handleComboChat runs shadow targets without changing the primary response or metrics", async () => {
+  const calls: any[] = [];
+  const combo = {
+    name: "shadow-routing-priority",
+    models: ["openai/gpt-4o-mini"],
+    config: {
+      shadowRouting: {
+        enabled: true,
+        targets: [
+          {
+            kind: "model",
+            id: "shadow-anthropic",
+            providerId: "anthropic",
+            model: "anthropic/claude-3-haiku",
+            label: "Dark launch target",
+          },
+        ],
+        sampleRate: 1,
+        maxTargets: 1,
+      },
+    },
+  };
+
+  const result = await handleComboChat({
+    body: { stream: true },
+    combo,
+    handleSingleModel: async (body: any, modelStr: any, target?: any) => {
+      calls.push({
+        modelStr,
+        trafficType: target?.trafficType ?? "production",
+        stream: body.stream,
+      });
+      if (target?.trafficType === "shadow") return errorResponse(503, "shadow failed");
+      return okResponse();
+    },
+    isModelAvailable: async () => true,
+    log: createLog(),
+    settings: null,
+    allCombos: null,
+  });
+
+  await waitForBackgroundWork();
+
+  const metrics = getComboMetrics("shadow-routing-priority");
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, [
+    { modelStr: "openai/gpt-4o-mini", trafficType: "production", stream: true },
+    { modelStr: "anthropic/claude-3-haiku", trafficType: "shadow", stream: false },
+  ]);
+  assert.equal(metrics.totalRequests, 1);
+  assert.equal(metrics.totalSuccesses, 1);
+  assert.equal(metrics.byModel["openai/gpt-4o-mini"].requests, 1);
+  assert.equal(metrics.byModel["anthropic/claude-3-haiku"], undefined);
+  assert.equal(metrics.shadow.totalRequests, 1);
+  assert.equal(metrics.shadow.totalFailures, 1);
+  assert.equal(metrics.shadow.byModel["anthropic/claude-3-haiku"].requests, 1);
+});
+
+test("handleComboChat honors shadow sampleRate zero", async () => {
+  const calls: any[] = [];
+  const combo = {
+    name: "shadow-routing-sampled-out",
+    models: ["openai/gpt-4o-mini"],
+    config: {
+      shadowRouting: {
+        enabled: true,
+        targets: ["anthropic/claude-3-haiku"],
+        sampleRate: 0,
+      },
+    },
+  };
+
+  const result = await handleComboChat({
+    body: {},
+    combo,
+    handleSingleModel: async (_body: any, modelStr: any, target?: any) => {
+      calls.push({ modelStr, trafficType: target?.trafficType ?? "production" });
+      return okResponse();
+    },
+    isModelAvailable: async () => true,
+    log: createLog(),
+    settings: null,
+    allCombos: null,
+  });
+
+  await waitForBackgroundWork();
+
+  const metrics = getComboMetrics("shadow-routing-sampled-out");
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, [{ modelStr: "openai/gpt-4o-mini", trafficType: "production" }]);
+  assert.equal(metrics.totalRequests, 1);
+  assert.equal(metrics.shadow.totalRequests, 0);
 });
 
 test("handleComboChat priority strategy honors composite tier order before fallback", async () => {

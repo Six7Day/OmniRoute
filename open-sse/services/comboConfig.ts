@@ -28,6 +28,13 @@ const DEFAULT_COMBO_CONFIG = {
   setRetryDelayMs: 2000,
   resetAwareQuotaCacheTtlMs: 0,
   resetAwareQuotaCacheMaxStaleMs: 0,
+  shadowRouting: {
+    enabled: false,
+    targets: [],
+    sampleRate: 1,
+    maxTargets: 2,
+    timeoutMs: 30000,
+  },
 };
 
 const LEGACY_COMBO_RESILIENCE_KEYS = new Set([
