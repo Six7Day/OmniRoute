@@ -1340,6 +1340,7 @@ export default function ProviderDetailPage() {
   const [batchDeleting, setBatchDeleting] = useState(false);
   const commandCodeAuthWindowRef = useRef<Window | null>(null);
   const commandCodeAuthTimerRef = useRef<number | null>(null);
+  const codexSettingsRequestSeqRef = useRef(0);
   const isOpenAICompatible = isOpenAICompatibleProvider(providerId);
   const isCcCompatible = isClaudeCodeCompatibleProvider(providerId);
   const isCommandCode = providerId === "command-code";
@@ -1633,6 +1634,10 @@ export default function ProviderDetailPage() {
   }, [importingZedManual, zedManualProvider, zedManualToken, notify, fetchConnections]);
 
   const loadCodexSettings = useCallback(async () => {
+    const requestSeq = codexSettingsRequestSeqRef.current + 1;
+    codexSettingsRequestSeqRef.current = requestSeq;
+    const isCurrentRequest = () => codexSettingsRequestSeqRef.current === requestSeq;
+
     if (providerId !== "codex") {
       setCodexSettingsLoaded(false);
       setCodexSettingsLoadError(null);
@@ -1651,11 +1656,13 @@ export default function ProviderDetailPage() {
       if (!data || typeof data !== "object") {
         throw new Error("Settings response was empty");
       }
+      if (!isCurrentRequest()) return;
       const resolvedCodexServiceTier = resolveCodexGlobalFastServiceTier(data);
       setCodexGlobalServiceMode(getCodexGlobalServiceMode(data));
       setCodexGlobalSupportedModels([...resolvedCodexServiceTier.supportedModels]);
       setCodexSettingsLoaded(true);
     } catch (error) {
+      if (!isCurrentRequest()) return;
       setCodexSettingsLoaded(false);
       setCodexSettingsLoadError(error instanceof Error ? error.message : "Failed to load settings");
     }
@@ -3819,7 +3826,7 @@ export default function ProviderDetailPage() {
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <h2 className="text-lg font-semibold">{t("connections")}</h2>
               {providerId === "codex" && (
-                <label
+                <div
                   className="inline-flex items-center gap-2 rounded-lg border border-sky-500/20 bg-sky-500/5 px-2 py-1 text-xs font-medium text-text-muted"
                   title={providerText(
                     t,
@@ -3857,7 +3864,7 @@ export default function ProviderDetailPage() {
                       {providerText(t, "retry", "Retry")}
                     </button>
                   ) : null}
-                </label>
+                </div>
               )}
               {/* Provider-level proxy indicator/button */}
               <button

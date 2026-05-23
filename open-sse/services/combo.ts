@@ -513,17 +513,25 @@ function scheduleShadowRouting(
 ): void {
   if (targets.length === 0) return;
   const shadowConfig = normalizeShadowRoutingConfig(config);
-  const shadowBaseBody = cloneRequestBodyForShadowRouting(body);
+  let shadowBaseBody: Record<string, unknown>;
+  try {
+    shadowBaseBody = cloneRequestBodyForShadowRouting(body);
+  } catch (error) {
+    log.warn("COMBO", "Shadow routing skipped: failed to clone request body", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return;
+  }
   const run = async () => {
     await Promise.all(
       targets.map(async (target) => {
         const startedAt = Date.now();
-        const shadowBody = {
-          ...cloneRequestBodyForShadowRouting(shadowBaseBody),
-          model: target.modelStr,
-          stream: false,
-        };
         try {
+          const shadowBody = {
+            ...cloneRequestBodyForShadowRouting(shadowBaseBody),
+            model: target.modelStr,
+            stream: false,
+          };
           if (isModelAvailable) {
             const available = await isModelAvailable(target.modelStr, target);
             if (!available) {

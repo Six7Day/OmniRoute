@@ -417,6 +417,28 @@ export async function executeChatWithBreaker({
         })
       );
 
+    if (isShadowTraffic) {
+      if (!bypassCircuitBreaker && breaker && !breaker.canExecute()) {
+        const retryAfterMs = breaker.getRetryAfterMs();
+        return {
+          result: {
+            success: false,
+            response: providerCircuitOpenResponse(provider, Math.ceil(retryAfterMs / 1000)),
+            status: HTTP_STATUS.SERVICE_UNAVAILABLE,
+          },
+          tlsFingerprintUsed: false,
+        };
+      }
+
+      if (!proxyInfo?.proxy && isTlsFingerprintActive()) {
+        const tracked = await runWithTlsTracking(chatFn);
+        return { result: tracked.result, tlsFingerprintUsed: tracked.tlsFingerprintUsed };
+      }
+
+      const result = await chatFn();
+      return { result, tlsFingerprintUsed: false };
+    }
+
     if (bypassCircuitBreaker) {
       if (!proxyInfo?.proxy && isTlsFingerprintActive()) {
         const tracked = await runWithTlsTracking(chatFn);
