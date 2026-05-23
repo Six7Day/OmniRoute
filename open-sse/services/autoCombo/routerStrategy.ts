@@ -13,6 +13,7 @@
 import type { ProviderCandidate, ScoredProvider } from "./scoring.ts";
 import { scorePool } from "./scoring.ts";
 import { getTaskFitness } from "./taskFitness.ts";
+import { clamp01 } from "../../utils/number.ts";
 
 export interface SlaRoutingPolicy {
   targetP95Ms?: number;
@@ -134,11 +135,6 @@ class LatencyStrategyImpl implements RouterStrategy {
 const DEFAULT_SLA_TARGET_P95_MS = 2_000;
 const DEFAULT_SLA_MAX_ERROR_RATE = 0.05;
 
-function clamp01(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.min(1, Math.max(0, value));
-}
-
 function toPositiveFinite(value: unknown): number | undefined {
   const numericValue = Number(value);
   return Number.isFinite(numericValue) && numericValue > 0 ? numericValue : undefined;
@@ -153,6 +149,12 @@ function inverseNormalized(value: number, maxValue: number): number {
   if (!Number.isFinite(value) || value < 0) return 0;
   if (!Number.isFinite(maxValue) || maxValue <= 0) return 1;
   return clamp01(1 - value / maxValue);
+}
+
+function scoreAtOrBelowThreshold(value: number, threshold: number): number {
+  // A zero threshold is an intentional zero-tolerance policy.
+  if (threshold <= 0) return value === 0 ? 1 : clamp01(1 - value);
+  return clamp01(threshold / Math.max(value, 0.000_001));
 }
 
 function getHealthScore(candidate: ProviderCandidate): number {
@@ -193,7 +195,6 @@ class SLAStrategyImpl implements RouterStrategy {
     const candidates = healthy.length > 0 ? healthy : pool;
     if (candidates.length === 0) throw new Error("[SLAStrategy] No candidates available");
 
-    const maxLatency = Math.max(...candidates.map((c) => c.p95LatencyMs), 1);
     const maxCost = Math.max(...candidates.map((c) => c.costPer1MTokens), 0.001);
     const maxStdDev = Math.max(...candidates.map((c) => c.latencyStdDev), 0.001);
     const policy: Required<SlaRoutingPolicy> = {
@@ -205,16 +206,11 @@ class SLAStrategyImpl implements RouterStrategy {
 
     const scored = candidates
       .map((candidate) => {
-        const latencyScore = policy.targetP95Ms
-          ? clamp01(policy.targetP95Ms / Math.max(candidate.p95LatencyMs, 1))
-          : inverseNormalized(candidate.p95LatencyMs, maxLatency);
-        const errorScore =
-          policy.maxErrorRate > 0
-            ? clamp01(1 - candidate.errorRate / policy.maxErrorRate)
-            : clamp01(1 - candidate.errorRate);
+        const latencyScore = scoreAtOrBelowThreshold(candidate.p95LatencyMs, policy.targetP95Ms);
+        const errorScore = scoreAtOrBelowThreshold(candidate.errorRate, policy.maxErrorRate);
         const costScore =
           policy.maxCostPer1MTokens > 0
-            ? clamp01(1 - candidate.costPer1MTokens / policy.maxCostPer1MTokens)
+            ? scoreAtOrBelowThreshold(candidate.costPer1MTokens, policy.maxCostPer1MTokens)
             : inverseNormalized(candidate.costPer1MTokens, maxCost);
         const stabilityScore = inverseNormalized(candidate.latencyStdDev, maxStdDev);
         const healthScore = getHealthScore(candidate);
@@ -238,12 +234,11 @@ class SLAStrategyImpl implements RouterStrategy {
         return b.score - a.score;
       });
 
-    const compliant = scored.filter((entry) => entry.violationScore === 0);
-    const ranked = compliant.length > 0 ? compliant : scored;
-    const best = ranked[0];
+    const best = scored[0];
     if (!best) throw new Error("[SLAStrategy] No candidates available after scoring");
 
-    const fallbackNote = compliant.length === 0 ? "; no candidate met all SLA constraints" : "";
+    const anyCompliant = scored.some((entry) => entry.violationScore === 0);
+    const fallbackNote = !anyCompliant ? "; no candidate met all SLA constraints" : "";
     return {
       provider: best.candidate.provider,
       model: best.candidate.model,

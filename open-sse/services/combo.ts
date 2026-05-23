@@ -16,6 +16,7 @@ import {
 } from "./accountFallback.ts";
 import { RateLimitReason } from "../config/constants.ts";
 import { errorResponse, unavailableResponse } from "../utils/error.ts";
+import { clamp01 } from "../utils/number.ts";
 import { recordComboIntent, recordComboRequest, getComboMetrics } from "./comboMetrics.ts";
 import { resolveComboConfig, getDefaultComboConfig } from "./comboConfig.ts";
 import { maybeGenerateHandoff, resolveContextRelayConfig } from "./contextHandoff.ts";
@@ -909,11 +910,6 @@ function orderTargetsByPowerOfTwoChoices(targets: ResolvedComboTarget[], comboNa
       ? secondIndex
       : firstIndex;
   return [targets[selectedIndex], ...targets.filter((_, index) => index !== selectedIndex)];
-}
-
-function clamp01(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.max(0, Math.min(1, value));
 }
 
 function finiteNumberOrNull(value: unknown): number | null {
