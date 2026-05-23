@@ -23,20 +23,20 @@ type AnalyticsTab =
 const ANALYTICS_TABS: Array<{
   id: AnalyticsTab;
   labelKey: string;
-  fallback: string;
+  label: string;
   icon: string;
 }> = [
-  { id: "overview", labelKey: "overview", fallback: "Overview", icon: "analytics" },
-  { id: "evals", labelKey: "evals", fallback: "Evals", icon: "science" },
-  { id: "search", labelKey: "search", fallback: "Search", icon: "travel_explore" },
-  { id: "utilization", labelKey: "utilization", fallback: "Utilization", icon: "monitoring" },
+  { id: "overview", labelKey: "overview", label: "Overview", icon: "analytics" },
+  { id: "evals", labelKey: "evals", label: "Evals", icon: "science" },
+  { id: "search", labelKey: "search", label: "Search", icon: "travel_explore" },
+  { id: "utilization", labelKey: "utilization", label: "Utilization", icon: "monitoring" },
   {
     id: "combo-health",
     labelKey: "comboHealth",
-    fallback: "Combo Health",
+    label: "Combo Health",
     icon: "health_and_safety",
   },
-  { id: "route-trace", labelKey: "routeTrace", fallback: "Route Trace", icon: "alt_route" },
+  { id: "route-trace", labelKey: "routeTrace", label: "Route Trace", icon: "alt_route" },
 ];
 
 type AnalyticsTranslator = ((key: string, values?: Record<string, unknown>) => string) & {
@@ -106,7 +106,7 @@ function AnalyticsPageContent() {
               <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
                 {tab.icon}
               </span>
-              {analyticsText(t, tab.labelKey, tab.fallback)}
+              {analyticsText(t, tab.labelKey, tab.label)}
             </button>
           );
         })}
