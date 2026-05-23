@@ -58,13 +58,18 @@ function roundCost(value: number): number {
   return Math.round(value * 1_000_000) / 1_000_000;
 }
 
-function normalizeServiceTier(value: unknown): "standard" | "priority" {
+function normalizeServiceTier(value: unknown): "standard" | "priority" | "flex" {
   const tier = typeof value === "string" ? value.trim().toLowerCase() : "";
-  return tier === "priority" || tier === "fast" ? "priority" : "standard";
+  if (tier === "priority" || tier === "fast") return "priority";
+  if (tier === "flex") return "flex";
+  return "standard";
 }
 
 function getServiceTierLabel(serviceTier: string): string {
-  return normalizeServiceTier(serviceTier) === "priority" ? "Fast" : "Standard";
+  const normalized = normalizeServiceTier(serviceTier);
+  if (normalized === "priority") return "Fast";
+  if (normalized === "flex") return "Flex";
+  return "Standard";
 }
 
 function appendWhereCondition(whereClause: string, condition: string): string {
@@ -242,6 +247,22 @@ function computeUsageRowCost(
       model,
       serviceTier,
     }
+  );
+}
+
+function computeUsageRowStandardCost(
+  row: Record<string, unknown>,
+  pricingByProvider: PricingByProvider,
+  providerAliasMap: Record<string, string>,
+  normalizeModelName: (model: string) => string,
+  computeCostFromPricing: ComputeCostFromPricing
+): number {
+  return computeUsageRowCost(
+    { ...row, serviceTier: "standard", service_tier: "standard" },
+    pricingByProvider,
+    providerAliasMap,
+    normalizeModelName,
+    computeCostFromPricing
   );
 }
 
@@ -685,8 +706,12 @@ export async function GET(request: Request) {
       fallbackCount: Number(fallbackRow?.fallbacks || 0),
       fastRequests: 0,
       standardRequests: 0,
+      flexRequests: 0,
       fastCost: 0,
       standardCost: 0,
+      flexCost: 0,
+      flexSavings: 0,
+      flexUsageSavingsTokens: 0,
       fastRequestSharePct: 0,
       fallbackRatePct:
         Number(fallbackRow?.fallback_eligible || 0) > 0
@@ -930,13 +955,15 @@ export async function GET(request: Request) {
     const serviceTierMap = new Map<
       string,
       {
-        serviceTier: "standard" | "priority";
+        serviceTier: "standard" | "priority" | "flex";
         label: string;
         requests: number;
         promptTokens: number;
         completionTokens: number;
         totalTokens: number;
         cost: number;
+        savings: number;
+        usageSavingsTokens: number;
       }
     >();
     for (const row of serviceTierRows) {
@@ -949,27 +976,54 @@ export async function GET(request: Request) {
         completionTokens: 0,
         totalTokens: 0,
         cost: 0,
+        savings: 0,
+        usageSavingsTokens: 0,
       };
       existing.requests += Number(row.requests || 0);
       existing.promptTokens += Number(row.promptTokens || 0);
       existing.completionTokens += Number(row.completionTokens || 0);
       existing.totalTokens += Number(row.totalTokens || 0);
-      existing.cost += computeUsageRowCost(
+      const actualCost = computeUsageRowCost(
         row,
         pricingByProvider,
         PROVIDER_ID_TO_ALIAS,
         normalizeModelName,
         computeCostFromPricing
       );
+      existing.cost += actualCost;
+      if (serviceTier === "flex") {
+        const standardCost = computeUsageRowStandardCost(
+          row,
+          pricingByProvider,
+          PROVIDER_ID_TO_ALIAS,
+          normalizeModelName,
+          computeCostFromPricing
+        );
+        existing.savings += Math.max(0, standardCost - actualCost);
+        existing.usageSavingsTokens += Math.max(0, Number(row.totalTokens || 0) * 0.5);
+      }
       serviceTierMap.set(serviceTier, existing);
     }
     const byServiceTier = Array.from(serviceTierMap.values())
-      .map((row) => ({ ...row, cost: roundCost(row.cost) }))
-      .sort((left, right) => (left.serviceTier === "priority" ? -1 : 1));
+      .map((row) => ({
+        ...row,
+        cost: roundCost(row.cost),
+        savings: roundCost(row.savings),
+        usageSavingsTokens: Math.round(row.usageSavingsTokens),
+      }))
+      .sort((left, right) => {
+        const order = { priority: 0, flex: 1, standard: 2 } as const;
+        return order[left.serviceTier] - order[right.serviceTier];
+      });
     const fastTier = serviceTierMap.get("priority");
+    const flexTier = serviceTierMap.get("flex");
     const standardTier = serviceTierMap.get("standard");
     summary.fastRequests = fastTier?.requests || 0;
     summary.fastCost = roundCost(fastTier?.cost || 0);
+    summary.flexRequests = flexTier?.requests || 0;
+    summary.flexCost = roundCost(flexTier?.cost || 0);
+    summary.flexSavings = roundCost(flexTier?.savings || 0);
+    summary.flexUsageSavingsTokens = Math.round(flexTier?.usageSavingsTokens || 0);
     summary.standardRequests = standardTier?.requests || 0;
     summary.standardCost = roundCost(standardTier?.cost || 0);
     summary.fastRequestSharePct =

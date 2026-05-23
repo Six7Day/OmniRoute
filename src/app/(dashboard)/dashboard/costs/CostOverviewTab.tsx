@@ -41,6 +41,10 @@ interface UsageAnalyticsSummary {
   fallbackRatePct: number;
   requestedModelCoveragePct: number;
   streak: number;
+  flexRequests?: number;
+  flexCost?: number;
+  flexSavings?: number;
+  flexUsageSavingsTokens?: number;
 }
 
 interface UsageAnalyticsProviderRow {
@@ -81,13 +85,15 @@ interface UsageAnalyticsAccountRow {
 }
 
 interface UsageAnalyticsServiceTierRow {
-  serviceTier: "standard" | "priority";
+  serviceTier: "standard" | "priority" | "flex";
   label: string;
   requests: number;
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
   cost: number;
+  savings?: number;
+  usageSavingsTokens?: number;
 }
 
 interface UsageAnalyticsPayload {
