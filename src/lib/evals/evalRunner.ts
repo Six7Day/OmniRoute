@@ -3,7 +3,7 @@
  *
  * Framework for evaluating LLM responses against a golden set.
  * Supports multiple evaluation strategies: exact match, contains,
- * semantic similarity, and custom functions.
+ * regex, and custom functions.
  *
  * @module lib/evals/evalRunner
  */
@@ -136,12 +136,15 @@ export function evaluateCase(evalCase: any, actualOutput: string) {
         break;
 
       case "regex": {
-        const regex =
-          evalCase.expected.value instanceof RegExp
-            ? evalCase.expected.value
-            : new RegExp(evalCase.expected.value);
+        const expectedValue = evalCase.expected.value;
+        if (!(expectedValue instanceof RegExp) && typeof expectedValue !== "string") {
+          passed = false;
+          details.error = "No regex value provided for evaluation.";
+          break;
+        }
+        const regex = expectedValue instanceof RegExp ? expectedValue : new RegExp(expectedValue);
         passed = regex.test(actualOutput);
-        details.pattern = String(evalCase.expected.value);
+        details.pattern = String(expectedValue);
         break;
       }
 
@@ -168,13 +171,14 @@ export function evaluateCase(evalCase: any, actualOutput: string) {
       durationMs: Date.now() - start,
       details,
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
     return {
       caseId: evalCase.id,
       caseName: evalCase.name,
       passed: false,
       durationMs: Date.now() - start,
-      error: error.message,
+      error: errorMessage,
     };
   }
 }
@@ -253,10 +257,11 @@ export function createScorecard(runs: any[]) {
 }
 
 /**
- * Reset all suites (for testing).
+ * Reset test-registered suites and restore built-in suites.
  */
 export function resetSuites() {
   suites.clear();
+  registerBuiltInSuites();
 }
 
 // ─── Built-in Golden Set Suite (≥10 cases, multi-model) ────────────────
@@ -929,3 +934,19 @@ const codexComparisonSuite = {
 };
 
 registerSuite(codexComparisonSuite);
+
+const builtInSuites = [
+  goldenSet,
+  codingSuite,
+  reasoningSuite,
+  multilingualSuite,
+  safetySuite,
+  instructionSuite,
+  codexComparisonSuite,
+];
+
+function registerBuiltInSuites() {
+  for (const suite of builtInSuites) {
+    registerSuite(suite);
+  }
+}
