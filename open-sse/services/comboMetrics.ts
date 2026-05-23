@@ -57,6 +57,7 @@ interface ComboTargetMetricsView extends ComboTargetMetrics {
 }
 
 interface ComboMetricsView extends ComboMetricsEntry {
+  productionTraffic: boolean;
   avgLatencyMs: number;
   successRate: number;
   fallbackRate: number;
@@ -351,12 +352,14 @@ function getComboShadowMetrics(comboName: string): ComboShadowMetricsView {
  * @returns {Object|null}
  */
 export function getComboMetrics(comboName: string): ComboMetricsView | null {
+  const productionCombo = metrics.get(comboName);
   const combo =
-    metrics.get(comboName) || (shadowMetrics.has(comboName) ? createComboEntry("priority") : null);
+    productionCombo || (shadowMetrics.has(comboName) ? createComboEntry("priority") : null);
   if (!combo) return null;
 
   return {
     ...combo,
+    productionTraffic: !!productionCombo && productionCombo.totalRequests > 0,
     avgLatencyMs:
       combo.totalRequests > 0 ? Math.round(combo.totalLatencyMs / combo.totalRequests) : 0,
     successRate:

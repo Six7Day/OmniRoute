@@ -275,6 +275,7 @@ test("handleComboChat priority strategy defaults to first model and records succ
 
 test("handleComboChat runs shadow targets without changing the primary response or metrics", async () => {
   const calls: any[] = [];
+  const shadowRequests: any[] = [];
   const combo = {
     name: "shadow-routing-priority",
     models: ["openai/gpt-4o-mini"],
@@ -305,6 +306,12 @@ test("handleComboChat runs shadow targets without changing the primary response 
         trafficType: target?.trafficType ?? "production",
         stream: body.stream,
       });
+      if (target?.trafficType === "shadow") {
+        shadowRequests.push({
+          executionKey: target.executionKey,
+          hasBodyMarker: body._omnirouteShadowRouting === true,
+        });
+      }
       if (target?.trafficType === "shadow") return errorResponse(503, "shadow failed");
       return okResponse();
     },
@@ -322,6 +329,9 @@ test("handleComboChat runs shadow targets without changing the primary response 
   assert.deepEqual(calls, [
     { modelStr: "openai/gpt-4o-mini", trafficType: "production", stream: true },
     { modelStr: "anthropic/claude-3-haiku", trafficType: "shadow", stream: false },
+  ]);
+  assert.deepEqual(shadowRequests, [
+    { executionKey: "shadow>shadow-anthropic", hasBodyMarker: false },
   ]);
   assert.equal(metrics.totalRequests, 1);
   assert.equal(metrics.totalSuccesses, 1);

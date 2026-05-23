@@ -13,7 +13,7 @@ import type {
 
 type JsonRecord = Record<string, unknown>;
 
-type ProviderConnectionView = JsonRecord & {
+export type ProviderConnectionView = JsonRecord & {
   id?: string | null;
   provider?: string | null;
   testStatus?: string | null;
@@ -29,6 +29,7 @@ export interface InspectTargetResilienceOptions {
   model: string;
   connectionId?: string | null;
   allowedConnectionIds?: string[] | null;
+  providerConnections?: ProviderConnectionView[] | null;
   now?: number;
 }
 
@@ -365,10 +366,12 @@ export async function inspectTargetResilience(
   if (providerInspection.skipReason) skipReasons.push(providerInspection.skipReason);
 
   try {
-    const connections = (await getProviderConnections({
-      provider: options.provider,
-      isActive: true,
-    })) as ProviderConnectionView[];
+    const connections =
+      options.providerConnections ??
+      ((await getProviderConnections({
+        provider: options.provider,
+        isActive: true,
+      })) as ProviderConnectionView[]);
     const allowedIds = options.allowedConnectionIds
       ? new Set(options.allowedConnectionIds.filter((id) => typeof id === "string" && id))
       : null;

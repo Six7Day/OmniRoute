@@ -1,7 +1,11 @@
 import { buildComboHealthAutopilotReport } from "@/lib/monitoring/comboHealthAutopilot";
+import { getProviderConnections } from "@/lib/db/providers";
 import { buildComboForecastResponse } from "@/lib/usage/comboForecast";
 import { buildComboHealthResponse } from "@/lib/usage/comboHealth";
-import { inspectTargetResilience } from "@/lib/usage/resilienceExplain";
+import {
+  inspectTargetResilience,
+  type ProviderConnectionView,
+} from "@/lib/usage/resilienceExplain";
 import { getCircuitBreaker } from "@/shared/utils/circuitBreaker";
 import {
   calculateFactors,
@@ -288,6 +292,18 @@ async function buildInspectorCombo(
     })
     .sort((left, right) => right.score - left.score);
 
+  const connectionsByProvider = new Map<string, ProviderConnectionView[]>();
+  await Promise.all(
+    [...new Set(scored.map((item) => item.entry.context.target.provider).filter(Boolean))].map(
+      async (provider) => {
+        connectionsByProvider.set(
+          provider,
+          (await getProviderConnections({ provider, isActive: true })) as ProviderConnectionView[]
+        );
+      }
+    )
+  );
+
   const inspectorTargets: ComboScoringInspectorTarget[] = await Promise.all(
     scored.map(async (item, index) => {
       const target = item.entry.context.target;
@@ -295,6 +311,7 @@ async function buildInspectorCombo(
         provider: target.provider,
         model: target.model,
         connectionId: target.connectionId,
+        providerConnections: connectionsByProvider.get(target.provider),
       });
       return {
         executionKey: target.executionKey,
