@@ -166,7 +166,9 @@ test("GET /api/usage/analytics applies Codex Fast tier multipliers and exposes t
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run("codex", "gpt-5.5", "codex-flex", 1000, 500, 1, 250, "flex", timestamp);
 
-  const response = await analyticsRoute.GET(makeRequest("http://localhost/api/usage/analytics"));
+  const response = await analyticsRoute.GET(
+    makeRequest("http://localhost/api/usage/analytics?presets=1d")
+  );
   const body = await response.json();
 
   assert.equal(response.status, 200);
@@ -192,6 +194,7 @@ test("GET /api/usage/analytics applies Codex Fast tier multipliers and exposes t
   assert.equal(flexTier.usageSavingsTokens, 750);
   assertClose(body.byProvider[0].cost, 0.08);
   assertClose(body.byModel[0].cost, 0.08);
+  assertClose(body.presetSummaries["1d"].totalCost, 0.08);
 });
 
 test("GET /api/usage/analytics does not report flex savings for non-Codex providers", async () => {

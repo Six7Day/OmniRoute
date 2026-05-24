@@ -1136,6 +1136,7 @@ export async function GET(request: Request) {
             SELECT
               LOWER(model) as model,
               LOWER(provider) as provider,
+              COALESCE(NULLIF(service_tier, ''), 'standard') as serviceTier,
               COALESCE(SUM(tokens_input), 0) as promptTokens,
               COALESCE(SUM(tokens_output), 0) as completionTokens,
               COALESCE(SUM(tokens_cache_read), 0) as cacheReadTokens,
@@ -1143,7 +1144,7 @@ export async function GET(request: Request) {
               COALESCE(SUM(tokens_reasoning), 0) as reasoningTokens
             FROM usage_history
             ${presetWhere}
-            GROUP BY LOWER(model), LOWER(provider)
+            GROUP BY LOWER(model), LOWER(provider), serviceTier
           `
           )
           .all(presetParams) as Array<Record<string, unknown>>;

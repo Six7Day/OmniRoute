@@ -4,6 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { Card, EmptyState, SegmentedControl, CardSkeleton } from "@/shared/components";
 import {
+  getServiceTierDisplayLabel,
+  type TranslationFn as CostTranslationFn,
+} from "@/shared/utils/serviceTierLabels";
+import {
   ResponsiveContainer,
   PieChart,
   Pie,
@@ -137,48 +141,6 @@ const CHART_COLORS = [
   "#6366f1",
   "#ec4899",
 ];
-
-type CostTranslationFn = ((key: string, values?: Record<string, unknown>) => string) & {
-  has?: (key: string) => boolean;
-};
-type ServiceTierId = "standard" | "priority" | "flex";
-
-const SERVICE_TIER_LABEL_KEYS: Record<ServiceTierId, string> = {
-  priority: "serviceTierFast",
-  flex: "serviceTierFlex",
-  standard: "serviceTierStandard",
-};
-
-const SERVICE_TIER_FALLBACK_LABELS: Record<ServiceTierId, string> = {
-  priority: "Fast",
-  flex: "Flex",
-  standard: "Standard",
-};
-
-function normalizeServiceTierId(value: unknown): ServiceTierId {
-  const tier = typeof value === "string" ? value.trim().toLowerCase() : "";
-  if (tier === "priority" || tier === "fast") return "priority";
-  if (tier === "flex") return "flex";
-  return "standard";
-}
-
-function translateCostText(t: CostTranslationFn, key: string, fallback: string): string {
-  return typeof t.has === "function" && t.has(key) ? t(key) : fallback;
-}
-
-function getServiceTierDisplayLabel(
-  t: CostTranslationFn,
-  serviceTier: unknown,
-  fallback?: unknown
-): string {
-  const normalized = normalizeServiceTierId(serviceTier);
-  const fallbackText = typeof fallback === "string" ? fallback.trim() : "";
-  const fallbackLabel =
-    fallbackText && normalizeServiceTierId(fallbackText) !== normalized
-      ? fallbackText
-      : SERVICE_TIER_FALLBACK_LABELS[normalized];
-  return translateCostText(t, SERVICE_TIER_LABEL_KEYS[normalized], fallbackLabel);
-}
 
 function createCurrencyFormatter(locale: string) {
   return new Intl.NumberFormat(locale, {

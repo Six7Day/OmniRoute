@@ -11,6 +11,11 @@ import {
   formatApiKeyLabel as maskApiKeyLabel,
 } from "@/shared/utils/formatting";
 import {
+  getServiceTierDisplayLabel,
+  translateCostText,
+  type TranslationFn,
+} from "@/shared/utils/serviceTierLabels";
+import {
   BarChart,
   ComposedChart,
   Bar,
@@ -32,48 +37,6 @@ function createDateFormatter(locale: string, options: Intl.DateTimeFormatOptions
   } catch {
     return new Intl.DateTimeFormat(undefined, options);
   }
-}
-
-type ServiceTierId = "standard" | "priority" | "flex";
-type TranslationFn = ((key: string, values?: Record<string, unknown>) => string) & {
-  has?: (key: string) => boolean;
-};
-
-const SERVICE_TIER_LABEL_KEYS: Record<ServiceTierId, string> = {
-  priority: "serviceTierFast",
-  flex: "serviceTierFlex",
-  standard: "serviceTierStandard",
-};
-
-const SERVICE_TIER_FALLBACK_LABELS: Record<ServiceTierId, string> = {
-  priority: "Fast",
-  flex: "Flex",
-  standard: "Standard",
-};
-
-function normalizeServiceTierId(value: unknown): ServiceTierId {
-  const tier = typeof value === "string" ? value.trim().toLowerCase() : "";
-  if (tier === "priority" || tier === "fast") return "priority";
-  if (tier === "flex") return "flex";
-  return "standard";
-}
-
-function translateCostText(t: TranslationFn, key: string, fallback: string): string {
-  return typeof t.has === "function" && t.has(key) ? t(key) : fallback;
-}
-
-function getServiceTierDisplayLabel(
-  t: TranslationFn,
-  serviceTier: unknown,
-  fallback?: unknown
-): string {
-  const normalized = normalizeServiceTierId(serviceTier);
-  const fallbackText = typeof fallback === "string" ? fallback.trim() : "";
-  const fallbackLabel =
-    fallbackText && normalizeServiceTierId(fallbackText) !== normalized
-      ? fallbackText
-      : SERVICE_TIER_FALLBACK_LABELS[normalized];
-  return translateCostText(t, SERVICE_TIER_LABEL_KEYS[normalized], fallbackLabel);
 }
 
 // ── Custom Tooltip for dark theme ──────────────────────────────────────────
