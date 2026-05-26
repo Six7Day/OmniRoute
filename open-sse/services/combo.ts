@@ -594,10 +594,6 @@ function scheduleShadowRouting(
     );
   };
 
-  if (typeof setImmediate === "function") {
-    setImmediate(() => void run());
-    return;
-  }
   setTimeout(() => void run(), 0);
 }
 
