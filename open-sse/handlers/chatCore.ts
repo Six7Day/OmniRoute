@@ -1721,9 +1721,6 @@ export async function handleChatCore({
     };
   }
 
-  // Initialize rate limit settings from persisted DB (once, lazy)
-  await initializeRateLimits();
-
   // T07: Inject connectionId into credentials so executors can rotate API keys
   // using providerSpecificData.extraApiKeys (API Key Round-Robin feature)
   if (connectionId && credentials && !credentials.connectionId) {
@@ -1804,6 +1801,31 @@ export async function handleChatCore({
     apiFormat === "responses"
       ? FORMATS.OPENAI_RESPONSES
       : modelTargetFormat || getTargetFormat(provider, credentials?.providerSpecificData);
+
+  const initialProviderRequest =
+    body && typeof body === "object" && !Array.isArray(body)
+      ? {
+          ...(body as Record<string, unknown>),
+          model:
+            typeof (body as Record<string, unknown>).model === "string"
+              ? (body as Record<string, unknown>).model
+              : effectiveModel,
+        }
+      : body;
+
+  // Track pending requests before slower optional enrichment (settings, logging,
+  // compression) so active-request callers can observe the provider payload even
+  // when upstream never returns response headers.
+  trackPendingRequest(model, provider, connectionId, true, {
+    clientEndpoint: clientRawRequest?.endpoint || "/v1/chat/completions",
+    clientRequest: clientRawRequest?.body ?? body,
+    providerRequest: initialProviderRequest,
+    stage: "registered",
+  });
+
+  // Initialize rate limit settings from persisted DB (once, lazy)
+  await initializeRateLimits();
+
   const { body: bodyWithWebSearchFallback, fallback: webSearchFallbackPlan } =
     prepareWebSearchFallbackBody(body as Record<string, unknown>, {
       provider,
@@ -2094,6 +2116,7 @@ export async function handleChatCore({
         clientResponse: cached,
         cacheSource: "semantic",
       });
+      trackPendingRequest(model, provider, connectionId, false);
       return {
         success: true,
         response: new Response(JSON.stringify(cached), {
@@ -3148,6 +3171,7 @@ export async function handleChatCore({
     log?.warn?.("TRANSLATE", `Request translation failed: ${message}`);
 
     if (errorType) {
+      trackPendingRequest(model, provider, connectionId, false);
       return {
         success: false,
         status: statusCode,
@@ -3170,6 +3194,7 @@ export async function handleChatCore({
       };
     }
 
+    trackPendingRequest(model, provider, connectionId, false);
     return createErrorResult(statusCode, message);
   }
 
@@ -3800,12 +3825,8 @@ export async function handleChatCore({
         }
       : translatedBody;
 
-  // Track pending request
-  trackPendingRequest(model, provider, connectionId, true, {
-    clientEndpoint: clientRawRequest?.endpoint || "/v1/chat/completions",
-    clientRequest: clientRawRequest?.body ?? body,
+  updatePendingRequest(model, provider, connectionId, {
     providerRequest: registeredProviderRequest,
-    stage: "registered",
   });
 
   // T5: track which models we've tried for intra-family fallback
