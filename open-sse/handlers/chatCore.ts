@@ -3785,11 +3785,26 @@ export async function handleChatCore({
     return execute();
   };
 
+  const registeredProviderRequest =
+    translatedBody && typeof translatedBody === "object" && !Array.isArray(translatedBody)
+      ? {
+          ...(translatedBody as Record<string, unknown>),
+          model:
+            typeof (translatedBody as Record<string, unknown>).model === "string"
+              ? (translatedBody as Record<string, unknown>).model
+              : effectiveModel,
+          ...(!Array.isArray((translatedBody as Record<string, unknown>).messages) &&
+          Array.isArray((body as Record<string, unknown>).messages)
+            ? { messages: (body as Record<string, unknown>).messages }
+            : {}),
+        }
+      : translatedBody;
+
   // Track pending request
   trackPendingRequest(model, provider, connectionId, true, {
     clientEndpoint: clientRawRequest?.endpoint || "/v1/chat/completions",
     clientRequest: clientRawRequest?.body ?? body,
-    providerRequest: translatedBody,
+    providerRequest: registeredProviderRequest,
     stage: "registered",
   });
 
