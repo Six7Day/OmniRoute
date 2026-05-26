@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { processCopilotChat } from "@/lib/copilot/engine";
 import type { CopilotRequest } from "@/lib/copilot/engine";
+import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error.ts";
 
 /**
  * POST /api/copilot/chat
@@ -12,6 +14,9 @@ import type { CopilotRequest } from "@/lib/copilot/engine";
  * Body: { messages: [{ role: "user"|"assistant", content: string }] }
  */
 export async function POST(request: Request) {
+  const authError = await requireManagementAuth(request);
+  if (authError) return authError;
+
   try {
     const body: CopilotRequest = await request.json();
 
@@ -23,7 +28,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json(response, { status: 200 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
+    const message = sanitizeErrorMessage(error);
     return NextResponse.json({ error: `Copilot error: ${message}` }, { status: 500 });
   }
 }
