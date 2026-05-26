@@ -34,6 +34,7 @@ import {
 import {
   COOLDOWN_MS,
   HTTP_STATUS,
+  FETCH_TIMEOUT_MS,
   FETCH_BODY_TIMEOUT_MS,
   MAX_TOOLS_LIMIT,
   PROVIDER_MAX_TOKENS,
@@ -692,6 +693,24 @@ function normalizeNonStreamingEventPayload(rawBody: string, contentType: string)
   return rawBody;
 }
 
+function isTruthyStreamBody(body: unknown): boolean {
+  return !!body && typeof body === "object" && (body as { stream?: unknown }).stream === true;
+}
+
+function isEventStreamAccepted(headers: Record<string, unknown> | Headers | null | undefined) {
+  return (getHeaderValueCaseInsensitive(headers, "accept") || "")
+    .toLowerCase()
+    .includes("text/event-stream");
+}
+
+function shouldTreatBufferedEventResponseAsExpected(
+  upstreamStream: boolean,
+  providerHeaders: Record<string, unknown> | Headers | null | undefined,
+  finalBody: unknown
+): boolean {
+  return upstreamStream || isEventStreamAccepted(providerHeaders) || isTruthyStreamBody(finalBody);
+}
+
 const NON_STREAMING_SSE_TERMINAL_TYPES = new Set([
   "message_stop",
   "response.completed",
@@ -779,6 +798,100 @@ function readStreamChunkWithTimeout(
       }
     );
   });
+}
+
+function createUpstreamStartTimeoutError(
+  timeoutMs: number,
+  provider: string,
+  model: string
+): Error {
+  const err = new Error(
+    `Upstream request did not return response headers after ${timeoutMs}ms (${provider}/${model})`
+  );
+  err.name = "TimeoutError";
+  return err;
+}
+
+function createAbortError(signal: AbortSignal): Error {
+  const reason = signal.reason;
+  if (reason instanceof Error) return reason;
+  const err = new Error(typeof reason === "string" ? reason : "The operation was aborted");
+  err.name = "AbortError";
+  return err;
+}
+
+function getExecutorTimeoutMs(executor: unknown): number {
+  const getTimeoutMs = (executor as { getTimeoutMs?: () => unknown } | null)?.getTimeoutMs;
+  if (typeof getTimeoutMs !== "function") return FETCH_TIMEOUT_MS;
+
+  try {
+    const timeoutMs = getTimeoutMs.call(executor);
+    if (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs)) return FETCH_TIMEOUT_MS;
+    return Math.max(0, Math.floor(timeoutMs));
+  } catch {
+    return FETCH_TIMEOUT_MS;
+  }
+}
+
+async function executeWithUpstreamStartTimeout<T>({
+  executor,
+  provider,
+  model,
+  signal,
+  log,
+  execute,
+}: {
+  executor: unknown;
+  provider: string;
+  model: string;
+  signal: AbortSignal;
+  log?: { warn?: (tag: string, message: string) => void } | null;
+  execute: (signal: AbortSignal) => Promise<T>;
+}): Promise<T> {
+  const timeoutMs = getExecutorTimeoutMs(executor);
+  if (timeoutMs <= 0) return execute(signal);
+  if (signal.aborted) throw createAbortError(signal);
+
+  const timeoutController = new AbortController();
+  const combinedController = new AbortController();
+  const timeoutError = createUpstreamStartTimeoutError(timeoutMs, provider, model);
+
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  let abortListener: (() => void) | null = null;
+  let timeoutAbortListener: (() => void) | null = null;
+
+  const abortCombined = (source: AbortSignal) => {
+    if (combinedController.signal.aborted) return;
+    const reason = source.reason instanceof Error ? source.reason : createAbortError(source);
+    combinedController.abort(reason);
+  };
+
+  abortListener = () => abortCombined(signal);
+  timeoutAbortListener = () => abortCombined(timeoutController.signal);
+  signal.addEventListener("abort", abortListener, { once: true });
+  timeoutController.signal.addEventListener("abort", timeoutAbortListener, { once: true });
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      log?.warn?.("TIMEOUT", timeoutError.message);
+      timeoutController.abort(timeoutError);
+      reject(timeoutError);
+    }, timeoutMs);
+  });
+
+  const abortPromise = new Promise<never>((_, reject) => {
+    signal.addEventListener("abort", () => reject(createAbortError(signal)), { once: true });
+  });
+
+  try {
+    return await Promise.race([execute(combinedController.signal), timeoutPromise, abortPromise]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+    if (abortListener) signal.removeEventListener("abort", abortListener);
+    if (timeoutAbortListener) {
+      timeoutController.signal.removeEventListener("abort", timeoutAbortListener);
+    }
+  }
 }
 
 /**
@@ -3375,6 +3488,10 @@ export async function handleChatCore({
         }
       }
 
+      updatePendingRequest(model, provider, connectionId, {
+        providerRequest: bodyToSend,
+      });
+
       trace("pre_semaphore", {
         semaphoreKey: accountSemaphoreKey,
         max: accountSemaphoreMaxConcurrency,
@@ -3418,18 +3535,26 @@ export async function handleChatCore({
             while (attempts < maxAttempts) {
               trace("pre_executor", { attempt: attempts });
               const execCreds = getExecutionCredentials();
-              const res = await executor.execute({
+              const res = await executeWithUpstreamStartTimeout({
+                executor,
+                provider,
                 model: modelToCall,
-                body: bodyToSend,
-                stream: upstreamStream,
-                credentials: execCreds,
                 signal: streamController.signal,
                 log,
-                extendedContext,
-                upstreamExtraHeaders: buildUpstreamHeadersForExecute(modelToCall),
-                clientHeaders: buildExecutorClientHeaders(clientRawRequest?.headers, userAgent),
-                onCredentialsRefreshed,
-                skipUpstreamRetry,
+                execute: (signal) =>
+                  executor.execute({
+                    model: modelToCall,
+                    body: bodyToSend,
+                    stream: upstreamStream,
+                    credentials: execCreds,
+                    signal,
+                    log,
+                    extendedContext,
+                    upstreamExtraHeaders: buildUpstreamHeadersForExecute(modelToCall),
+                    clientHeaders: buildExecutorClientHeaders(clientRawRequest?.headers, userAgent),
+                    onCredentialsRefreshed,
+                    skipUpstreamRetry,
+                  }),
               });
               trace("post_executor", { status: res?.response?.status });
 
@@ -4369,11 +4494,18 @@ export async function handleChatCore({
     if (looksLikeSSE) {
       const streamPayload = normalizeNonStreamingEventPayload(rawBody, contentType);
       const streamKind = contentType.includes("application/x-ndjson") ? "NDJSON" : "SSE";
-      log?.warn?.(
-        "STREAM",
-        `Unexpected ${streamKind} response for non-streaming request — buffering`
-      );
-      // Upstream returned SSE even though stream=false; convert best-effort to JSON.
+      if (shouldTreatBufferedEventResponseAsExpected(upstreamStream, providerHeaders, finalBody)) {
+        log?.debug?.(
+          "STREAM",
+          `Buffering upstream ${streamKind} response for non-streaming client request`
+        );
+      } else {
+        log?.warn?.(
+          "STREAM",
+          `Unexpected ${streamKind} response for non-streaming request — buffering`
+        );
+      }
+      // Upstream returned an event stream for a non-streaming client; convert best-effort to JSON.
       const parsedFromSSE = parseNonStreamingSSEPayload(streamPayload, targetFormat, model);
 
       if (!parsedFromSSE) {
