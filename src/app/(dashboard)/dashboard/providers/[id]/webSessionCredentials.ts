@@ -51,6 +51,12 @@ export const WEB_SESSION_CREDENTIAL_REQUIREMENTS = {
     placeholder: "abra_sess=...; other=value",
     acceptsFullCookieHeader: true,
   },
+  "claude-web": {
+    kind: "cookie",
+    credentialName: "sessionKey",
+    placeholder: "sessionKey=... or full Cookie header from claude.ai",
+    acceptsFullCookieHeader: true,
+  },
   "deepseek-web": {
     kind: "token",
     credentialName: "userToken",

@@ -143,7 +143,8 @@ export function getAutostartStatus() {
   if (process.platform === "linux") {
     const systemdUnit = linuxSystemdUnitPath();
     const desktopFile = linuxDesktopPath();
-    const systemdEnabled = isSystemdServiceEnabled();
+    const systemdUnitExists = existsSync(systemdUnit);
+    const systemdEnabled = isSystemdServiceEnabled() || systemdUnitExists;
     const desktopEnabled = existsSync(desktopFile);
     const enabled = systemdEnabled || desktopEnabled;
     let mechanism = null;
@@ -152,7 +153,7 @@ export function getAutostartStatus() {
     return {
       enabled,
       mechanism,
-      systemdUnit: existsSync(systemdUnit) ? systemdUnit : null,
+      systemdUnit: systemdUnitExists ? systemdUnit : null,
       desktopFile: desktopEnabled ? desktopFile : null,
       linger: tryReadLingerEnabled(),
     };
@@ -319,5 +320,6 @@ function disableLinux() {
 
 function isEnabledLinux() {
   if (isSystemdServiceEnabled()) return true;
+  if (existsSync(linuxSystemdUnitPath())) return true;
   return existsSync(linuxDesktopPath());
 }
