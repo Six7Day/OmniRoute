@@ -514,6 +514,43 @@ function flattenTypeArrays(obj: unknown): void {
 
 // Clean JSON Schema for Antigravity API compatibility - removes unsupported keywords recursively
 // Reference: CLIProxyAPI/internal/util/gemini_schema.go
+
+// Convert $ref to description hints (Lazy Hint strategy) to avoid 400 errors
+function convertRefsToHints(obj: Record<string, unknown> | unknown[]) {
+  if (!obj || typeof obj !== "object") return;
+
+  if (Array.isArray(obj)) {
+    for (const item of obj) convertRefsToHints(item);
+    return;
+  }
+
+  // If this node has a $ref, convert it to a hint and remove the $ref
+  if (obj.$ref && typeof obj.$ref === "string") {
+    const refVal = obj.$ref;
+    const defName = refVal.includes("/") ? refVal.substring(refVal.lastIndexOf("/") + 1) : refVal;
+
+    const hint = `See: ${defName}`;
+    if (obj.description) {
+      obj.description = `${obj.description} (${hint})`;
+    } else {
+      obj.description = hint;
+    }
+
+    // Force type to object to prevent it being an empty schema
+    if (!obj.type) obj.type = "object";
+
+    // Remove the $ref so Gemini doesn't complain about sibling fields
+    delete obj.$ref;
+  }
+
+  // Recurse into all properties
+  for (const value of Object.values(obj)) {
+    if (value && typeof value === "object") {
+      convertRefsToHints(value);
+    }
+  }
+}
+
 export function cleanJSONSchemaForAntigravity(schema: unknown): unknown {
   if (!schema || typeof schema !== "object") return schema;
 
@@ -521,6 +558,7 @@ export function cleanJSONSchemaForAntigravity(schema: unknown): unknown {
   let cleaned = inlineLocalSchemaRefs(root, root);
 
   // Phase 1: Convert and prepare
+  convertRefsToHints(cleaned);
   convertConstToEnum(cleaned);
   convertEnumValuesToStrings(cleaned);
 
