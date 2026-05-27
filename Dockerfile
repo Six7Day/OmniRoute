@@ -58,6 +58,9 @@ COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/.next/standalone ./
 # Explicitly copy @swc/helpers — not always traced by standalone output but needed at runtime
 COPY --from=builder /app/node_modules/@swc/helpers ./node_modules/@swc/helpers
+# Explicitly copy better-sqlite3 — native bindings are not reliably traced by
+# Next.js standalone output, but bootstrap-env requires SQLite before startup.
+COPY --from=builder /app/node_modules/better-sqlite3 ./node_modules/better-sqlite3
 # Explicitly copy pino transport dependencies — pino spawns a worker that requires
 # pino-abstract-transport at runtime; Next.js standalone trace does not capture it (#449)
 COPY --from=builder /app/node_modules/pino-abstract-transport ./node_modules/pino-abstract-transport
@@ -77,6 +80,8 @@ COPY --from=builder /app/scripts/dev/run-standalone.mjs ./dev/run-standalone.mjs
 COPY --from=builder /app/scripts/build/runtime-env.mjs ./build/runtime-env.mjs
 COPY --from=builder /app/scripts/build/bootstrap-env.mjs ./build/bootstrap-env.mjs
 COPY --from=builder /app/scripts/dev/healthcheck.mjs ./healthcheck.mjs
+
+RUN node -e "require('better-sqlite3')(':memory:').close()"
 
 # Hand /app over to the baked-in `node` non-root user (UID/GID 1000) so the
 # runtime process never holds root privileges. The chown happens after all
