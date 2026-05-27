@@ -3952,7 +3952,6 @@ export async function handleChatCore({
         : error.name === "TimeoutError" || error.name === "BodyTimeoutError"
           ? HTTP_STATUS.GATEWAY_TIMEOUT
           : HTTP_STATUS.BAD_GATEWAY;
-    console.error("DEBUG STACK:", error);
     const failureMessage =
       error.name === "AbortError"
         ? "Request aborted"

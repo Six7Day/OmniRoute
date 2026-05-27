@@ -2,7 +2,7 @@ import fs from "fs";
 import { execSync } from "child_process";
 import path from "path";
 
-const projectRoot = "/home/diegosouzapw/dev/proxys/OmniRoute";
+const projectRoot = process.env.PROJECT_ROOT || process.cwd();
 
 const filesToCheckoutOurs = [
   ".source/browser.ts",
@@ -291,7 +291,7 @@ RUN --mount=type=cache,target=/root/.npm \\
     // Error handling conflict
     content = content.replace(
       /<<<<<<< HEAD\r?\n\s+const message = sanitizeErrorMessage\(error\);\r?\n\s+return NextResponse\.json\(\{ error: `Copilot error: \$\{message\}` \}, \{ status: 500 \}\);\r?\n=======\r?\n\s+\/\/ buildErrorBody\(\) routes through sanitizeErrorMessage\(\), which strips\r?\n\s+\/\/ stack traces and absolute file paths\. Hard rule #12\.\r?\n\s+const message = error instanceof Error \? error\.message : "Unknown error";\r?\n\s+return NextResponse\.json\(buildErrorBody\(500, message\), \{ status: 500 \}\);\r?\n>>>>>>> release\/v3\.8\.4/g,
-      "    const message = sanitizeErrorMessage(error);\\n    return NextResponse.json(buildErrorBody(500, `Copilot error: ${message}`), { status: 500 });"
+      "    const message = sanitizeErrorMessage(error);\n    return NextResponse.json(buildErrorBody(500, `Copilot error: ${message}`), { status: 500 });"
     );
 
     fs.writeFileSync(copilotChatRoute, content);

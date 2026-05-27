@@ -4,7 +4,8 @@ import path from "path";
 
 const REPO = "diegosouzapw/OmniRoute";
 const artifactsDir =
-  "/home/diegosouzapw/.gemini/antigravity-ide/brain/62aa51db-9444-4394-8ba4-327794ee83c0";
+  process.env.ARTIFACTS_DIR ||
+  path.join(process.cwd(), "artifacts");
 
 async function main() {
   try {
