@@ -186,10 +186,14 @@ type ComboLogger = {
   debug: (...args: unknown[]) => void;
 };
 
+export type SingleModelTarget =
+  | (ResolvedComboTarget & { modelAbortSignal?: AbortSignal | null })
+  | { modelAbortSignal: AbortSignal };
+
 type HandleSingleModel = (
   body: Record<string, unknown>,
   modelStr: string,
-  target?: ResolvedComboTarget
+  target?: SingleModelTarget
 ) => Promise<Response>;
 
 type IsModelAvailable = (
@@ -2440,7 +2444,7 @@ export async function handleComboChat({
   const clientRequestedStream = body?.stream === true;
   // Wrap handleSingleModel to inject context caching tag on response (#401)
   const handleSingleModelWrapped = combo.context_cache_protection
-    ? async (b: Record<string, unknown>, modelStr: string, target?: ResolvedComboTarget) => {
+    ? async (b: Record<string, unknown>, modelStr: string, target?: SingleModelTarget) => {
         const res = await handleSingleModel(b, modelStr, target);
         if (!res.ok) return res;
 
@@ -2590,7 +2594,7 @@ export async function handleComboChat({
   const handleSingleModelWithTimeout = async (
     b: Record<string, unknown>,
     modelStr: string,
-    target?: ResolvedComboTarget
+    target?: SingleModelTarget
   ): Promise<Response> => {
     const timeoutController = new AbortController();
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
